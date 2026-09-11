@@ -54,6 +54,8 @@ public class HomeScreenController : MonoBehaviour
     [SerializeField] private GameObject[] settingsTabPages;
     [Tooltip("The settings panel's ScrollRect. Its content is repointed at whichever page is showing.")]
     [SerializeField] private ScrollRect settingsScroll;
+    [Tooltip("Underline that slides to the active tab. Optional: an older HomeScene has none.")]
+    [SerializeField] private TabIndicator settingsTabIndicator;
 
     [Header("Drive Feel")]
     [Tooltip("Scales the throttle command (persisted via DriveFeelSettings).")]
@@ -283,11 +285,15 @@ public class HomeScreenController : MonoBehaviour
             settingsScroll.verticalNormalizedPosition = 1f;
         }
 
+        // Slides to the tab that was just picked. Null on a HomeScene built before the indicator
+        // existed, which is why every use of it is guarded rather than assumed.
+        if (settingsTabIndicator != null) settingsTabIndicator.SetActiveTab(index);
+
         if (settingsTabButtons == null) return;
         for (int i = 0; i < settingsTabButtons.Length; i++)
         {
-            if (settingsTabButtons[i] != null && settingsTabButtons[i].image != null)
-                settingsTabButtons[i].image.color = i == index ? selectedTint : normalTint;
+            // Through PressFeedback rather than onto the Image: see PressFeedback.Tint.
+            PressFeedback.Tint(settingsTabButtons[i], i == index ? selectedTint : normalTint);
         }
     }
 
@@ -409,8 +415,11 @@ public class HomeScreenController : MonoBehaviour
         string selected = catalog != null ? catalog.SelectedModelId : null;
         foreach (KeyValuePair<Button, string> pair in modelButtons)
         {
-            if (pair.Key == null || pair.Key.image == null) continue;
-            pair.Key.image.color = pair.Value == selected ? selectedTint : normalTint;
+            if (pair.Key == null) continue;
+            // Through PressFeedback rather than onto the Image: see PressFeedback.Tint. This is
+            // the affordance that says which robot is about to be driven — if it silently stops
+            // working, the picker looks like it does nothing.
+            PressFeedback.Tint(pair.Key, pair.Value == selected ? selectedTint : normalTint);
         }
     }
 

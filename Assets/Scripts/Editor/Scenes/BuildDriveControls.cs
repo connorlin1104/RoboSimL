@@ -103,6 +103,11 @@ public static class BuildDriveControls
 
     private static void Build()
     {
+        // Where the user was, so they can be put back. Without this the tool left MainScene open,
+        // and since Play starts in whatever scene is open, running it silently changed which field
+        // you land in — which looks like the app changed its mind about the lite field.
+        string previousScenePath = UnityEngine.SceneManagement.SceneManager.GetActiveScene().path;
+
         Scene scene = EditorSceneManager.OpenScene(RoboSimPaths.MainScene, OpenSceneMode.Single);
         GameObject canvasGo = FindRootCanvas(scene);
         if (canvasGo == null)
@@ -121,9 +126,22 @@ public static class BuildDriveControls
         if (!EditorSceneManager.SaveScene(scene))
             throw new System.InvalidOperationException($"Build Drive Controls: failed to save {RoboSimPaths.MainScene}.");
 
+        // LiteScene is DERIVED from this scene, so it is now behind — its controls are whatever
+        // they were the last time it was built. The setting that picks it is a checkbox in the app,
+        // so the stale copy is what a player with "Lite Field" on actually drives in; the symptom is
+        // controls that revert to the old look the moment you press Drive.
+        string liteStatus = System.IO.File.Exists(RoboSimPaths.LiteScene)
+            ? " LiteScene is derived from this scene and is now out of date — run " +
+              "Tools > RoboSim > Scenes > Build Lite Field Scene to bring it along."
+            : string.Empty;
+
+        // Interactive runs put the user back where they were, like the other two scene builders.
+        if (!string.IsNullOrEmpty(previousScenePath) && previousScenePath != RoboSimPaths.MainScene)
+            EditorSceneManager.OpenScene(previousScenePath, OpenSceneMode.Single);
+
         Debug.Log("Build Drive Controls: Reset | Home | Camera row at top center, L1/L2 + R1/R2 shoulders, " +
                   $"arrow + XBAY diamonds updated in place in {RoboSimPaths.MainScene}; controls appearance {appearanceStatus}; " +
-                  $"{ChaseCameraName} + camera view button wired. Scene saved.");
+                  $"{ChaseCameraName} + camera view button wired. Scene saved.{liteStatus}");
     }
 
     // --- Home + Reset -------------------------------------------------------------------------
@@ -137,7 +155,9 @@ public static class BuildDriveControls
         if (home != null)
         {
             PlaceInTopRow((RectTransform)home, 0f);
-            EnsurePressFeedback(home.gameObject);
+            // Re-themed here as well as in Build Home Screen so neither tool has to have run first
+            // for the row to come out consistent. ApplyButtonTheme is find-or-add, so this is free.
+            BuildHomeScene.ApplyButtonTheme(home.gameObject, BuildHomeScene.AccentColor);
         }
         else
         {
@@ -446,14 +466,18 @@ public static class BuildDriveControls
     private static Button EnsureButton(Transform parent, string name, string label, float fontSize, Color color)
     {
         GameObject go = EnsureChild(parent, name);
-        Image image = EnsureComponent<Image>(go);
-        image.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
-        image.type = Image.Type.Sliced;
-        image.color = color;
+        // The Button goes on first: ApplyButtonTheme switches its transition off and tunes the press
+        // colour to whether the fill is a gradient, so it has to find one already there.
         Button button = EnsureComponent<Button>(go);
-        button.targetGraphic = image;
+
+        // Handed to the home-screen builder rather than re-implemented here. This factory used to set
+        // the sprite and a flat fill itself, so an accent button came out flat navy next to the menu's
+        // accent buttons — and next to the Home button sitting in the same row, which IS themed there.
+        // Sharing the one function is what keeps the top row reading as one row.
+        BuildHomeScene.ApplyButtonTheme(go, color);
+        button.targetGraphic = go.GetComponent<Image>();
+
         EnsureLabel(go.transform, label, fontSize);
-        EnsurePressFeedback(go);
         return button;
     }
 
@@ -462,6 +486,11 @@ public static class BuildDriveControls
     {
         GameObject go = EnsureChild(parent, "Label");
         TextMeshProUGUI text = EnsureComponent<TextMeshProUGUI>(go);
+        // The same typeface the home screen uses. This is a second implementation of what
+        // BuildHomeScene.CreateText does — the two builders share sprites and palette but not their
+        // label factories — so a font set only there would leave the field buttons in LiberationSans
+        // beside a menu in Inter.
+        text.font = HomeThemeFonts.Regular;
         text.text = label;
         text.fontSize = fontSize;
         text.color = BuildHomeScene.TextColor;

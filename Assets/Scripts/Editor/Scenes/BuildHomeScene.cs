@@ -39,15 +39,73 @@ public class BuildHomeScene
     // scene's EventSystem uses), resolved via GUID so a package move doesn't break us.
     private const string DefaultInputActionsGuid = "ca9f5fa95ffab41fb9a615ab714db018";
 
-    // Dark theme. Accent/neutral must match HomeScreenController's selection tints so the
-    // list highlight looks consistent with the rest of the buttons. Internal (with the UI
-    // helpers below) so Build Drive Controls builds the field-scene buttons in the same style.
-    private static readonly Color BackgroundColor = new Color32(0x1A, 0x1D, 0x23, 0xFF);
-    internal static readonly Color PanelColor = new Color32(0x26, 0x2A, 0x33, 0xF5);
-    internal static readonly Color ListColor = new Color32(0x1F, 0x23, 0x2B, 0xFF);
-    internal static readonly Color AccentColor = new Color(0.24f, 0.49f, 0.92f);
-    internal static readonly Color NeutralColor = new Color(0.23f, 0.25f, 0.30f);
-    internal static readonly Color TextColor = new Color32(0xE8, 0xEA, 0xF0, 0xFF);
+    // An empty marker object carrying this name is created in the scene and checked by
+    // HomeSceneIsValid. BUMP IT ON EVERY CHANGE TO THE HOME SCREEN'S APPEARANCE.
+    //
+    // Why it exists: HomeSceneIsValid is entirely STRUCTURAL — it asks which objects are present
+    // and which serialized refs are set. A restyle adds and removes nothing, so a new palette, a
+    // different sprite, a font swap, or a component attached to every button all leave every
+    // existing check passing. The rebuild is skipped and the redesign silently never ships. That
+    // has already happened once on this project: see Docs/App-Store-Submission.md on the app
+    // rename, where a text-only change never triggered a rebuild and the old title kept shipping.
+    //
+    // A version stamp turns "did I remember to add a check for this?" — a judgement call that has
+    // to be made correctly every time — into a one-line bump. It is also the ONLY thing that can
+    // catch a change with no object footprint at all, which an added component is.
+    internal const string HomeSceneStamp = "HomeSceneStamp_v3";
+
+    // The theme, derived from the app icon (Assets/Icons/AppIcon.png) rather than invented.
+    //
+    // The icon is a white chassis with navy wheels and a blue chevron on a #1D4ED8 -> #0EA5E9
+    // gradient. The UI used to share nothing with it: its darks were NEUTRAL GREY (#1A1D23,
+    // #262A33, #1F232B) while the brand's dark is NAVY, and its one accent (#3D7DEB) was near to
+    // but not either brand blue. Shifting the greys into the navy family is most of what makes the
+    // app look like its own icon, and it costs six constants.
+    //
+    // Internal (with the UI helpers below) so Build Drive Controls builds the field-scene buttons
+    // in the same style. HomeScreenController's and ControllerConfigScreen's runtime selection
+    // tints are WRITTEN from these values by the builder (see WriteRuntimeTints) rather than kept
+    // in sync by hand — a comment saying "these must match" is not a mechanism.
+
+    // Background: the icon's gradient driven far down in value. Full-strength brand blue behind a
+    // whole screen of text is unreadable, and it would fight the 3D robot the stage puts in front
+    // of it; the same hue family at a fraction of the value reads as the icon without either cost.
+    internal static readonly Color BackgroundTopColor = new Color32(0x0D, 0x1A, 0x3A, 0xFF);
+    internal static readonly Color BackgroundBottomColor = new Color32(0x12, 0x23, 0x4A, 0xFF);
+
+    // Surfaces. PanelColor is FULLY OPAQUE, and that is a bug fix, not a preference: it used to
+    // carry alpha 0xF5, and because the title is created before the panels, "RoboSimL" ghosted
+    // through every one of them at 4%. That is visible in three of the four shipped App Store
+    // screenshots and reads as broken rendering rather than as style.
+    internal static readonly Color PanelColor = new Color32(0x1B, 0x30, 0x60, 0xFF);
+    // The top of a panel's own gentle vertical gradient. Subtle on purpose — this is what reads as
+    // "raised" now that the panel sprite carries no drop shadow, and a strong ramp looks cheap.
+    internal static readonly Color PanelTopColor = new Color32(0x21, 0x3A, 0x70, 0xFF);
+    internal static readonly Color ListColor = new Color32(0x0A, 0x14, 0x2C, 0xFF);
+    internal static readonly Color NeutralColor = new Color32(0x2A, 0x40, 0x70, 0xFF);
+    internal static readonly Color BorderColor = new Color32(0x35, 0x54, 0x92, 0xFF);
+
+    // The two ends of the primary-action gradient — the icon's own blues, at full strength. Used
+    // only for the things that DO something (Drive, Back, Unlock, Submit), never for state.
+    internal static readonly Color PrimaryTopColor = new Color32(0x1D, 0x4E, 0xD8, 0xFF);
+    internal static readonly Color PrimaryBottomColor = new Color32(0x0E, 0xA5, 0xE9, 0xFF);
+
+    // Selection/live state, deliberately a DIFFERENT colour from a primary action. Today they are
+    // the same blue, so the selected robot row and the Drive button are indistinguishable and the
+    // player cannot tell "this is chosen" from "tap this".
+    internal static readonly Color SelectedColor = new Color32(0x0E, 0xA5, 0xE9, 0xFF);
+
+    internal static readonly Color TextColor = new Color32(0xF2, 0xF6, 0xFF, 0xFF);
+
+    // Kept as the flat stand-in for the primary gradient, for the places that need one colour
+    // rather than two: Build Drive Controls' field buttons (which sit over the 3D field, not over
+    // this navy, and would gain nothing from a gradient) and the section rules.
+    internal static readonly Color AccentColor = PrimaryTopColor;
+
+    // Muted text — section headers, column titles, hints. Was written out as
+    // "new Color(TextColor.r, TextColor.g, TextColor.b, 0.62f)" at six separate call sites.
+    internal static readonly Color TextMutedColor =
+        new Color(TextColor.r, TextColor.g, TextColor.b, 0.62f);
 
     [MenuItem("Tools/RoboSim/Scenes/Build Home Screen", false, 1)]
     private static void BuildInteractive()
@@ -76,6 +134,13 @@ public class BuildHomeScene
         //    any TextMeshProUGUI, or the labels have no default font.
         bool tmpImported;
         if (!EnsureTmpEssentials(interactive, out tmpImported)) return;
+
+        // 1b) The UI's generated sprites and font assets. Before the scene is built, because every
+        //     panel, button and label in it loads one, and both generators throw rather than
+        //     quietly falling back to the builtin skin. Each skips whatever already exists, so
+        //     this costs nothing on a re-run.
+        HomeThemeSprites.EnsureAll();
+        HomeThemeFonts.EnsureAll();
 
         // 2) The model catalog the home screen lists, and the (initially blank) submissions
         //    destination the Submit a Robot screen posts to.
@@ -173,6 +238,16 @@ public class BuildHomeScene
         }
         if (controller == null || configScreen == null) return false;
 
+        // The appearance stamp, checked FIRST so a restyle short-circuits every other check. Every
+        // test below this line is structural, and a change to how the screen LOOKS rather than what
+        // it contains passes all of them — see HomeSceneStamp.
+        if (FindDescendantRect(scene, HomeSceneStamp) == null) return false;
+
+        // The theme's own structural pieces. The stamp above would already catch these, but they
+        // are checked by name too so a scene that is stale for a SPECIFIC reason says which.
+        if (FindDescendantRect(scene, "HomeBackdrop") == null) return false;
+        if (FindDescendantRect(scene, "SettingsTabsIndicator") == null) return false;
+
         // Structural checks for things that have no serialized reference of their own. The tab row
         // and the scrollbar are pure hierarchy, so without these a pre-tabs HomeScene would report
         // "valid", the rebuild would be skipped, and the redesign would silently never appear.
@@ -233,7 +308,7 @@ public class BuildHomeScene
                IsRefSet(so, "inboxNotice") && IsRefSet(so, "inboxLabel") &&
                IsRefSet(so, "inboxMessageLabel") && IsRefSet(so, "inboxMessageViewport") &&
                IsRefSet(so, "inboxActionLabel") &&
-               IsRefSet(so, "settingsScroll") &&
+               IsRefSet(so, "settingsScroll") && IsRefSet(so, "settingsTabIndicator") &&
                IsArrayFilled(so, "settingsTabButtons") && IsArrayFilled(so, "settingsTabPages") &&
                IsRefSet(so, "driveSensitivitySlider") && IsRefSet(so, "turnSensitivitySlider") &&
                IsRefSet(configSo, "controlStyleButton") &&
@@ -370,7 +445,10 @@ public class BuildHomeScene
         cameraGo.transform.position = new Vector3(0f, 1f, -10f);
         Camera camera = cameraGo.AddComponent<Camera>();
         camera.clearFlags = CameraClearFlags.SolidColor;
-        camera.backgroundColor = BackgroundColor;
+        // Cleared to the TOP of the background gradient. The gradient itself is a full-screen
+        // Image on the canvas (see HomeBackdrop); this only matters for the frame before the
+        // canvas draws, and for any letterboxed edge.
+        camera.backgroundColor = BackgroundTopColor;
         cameraGo.AddComponent<AudioListener>();
         camera.GetUniversalAdditionalCameraData();
 
@@ -390,6 +468,31 @@ public class BuildHomeScene
         InputSystemUIInputModule uiModule = eventSystemGo.AddComponent<InputSystemUIInputModule>();
         AssignDefaultUiActions(uiModule);
 
+        // The background gradient — the app icon's own blues, driven far down in value. Created
+        // FIRST so it is the bottom-most canvas child and everything else draws over it.
+        //
+        // A full-screen Image rather than the camera's clear colour, because a camera can only
+        // clear to one flat colour. It is also why the robot stage in front of it has to composite
+        // through a RenderTexture: this canvas is ScreenSpaceOverlay, so it draws on top of every
+        // camera in the scene, and a directly-rendered robot would be hidden behind it.
+        GameObject backdrop = CreateUIObject("HomeBackdrop", canvasGo.transform);
+        RectTransform backdropRect = (RectTransform)backdrop.transform;
+        backdropRect.anchorMin = Vector2.zero;
+        backdropRect.anchorMax = Vector2.one;
+        backdropRect.offsetMin = Vector2.zero;
+        backdropRect.offsetMax = Vector2.zero;
+        Image backdropImage = backdrop.AddComponent<Image>();
+        backdropImage.color = Color.white; // the gradient supplies the colour; this is its tint
+        backdropImage.raycastTarget = false;
+        UiGradient backdropGradient = backdrop.AddComponent<UiGradient>();
+        backdropGradient.topColor = BackgroundTopColor;
+        backdropGradient.bottomColor = BackgroundBottomColor;
+
+        // Appearance version stamp — see HomeSceneStamp. An empty RectTransform with no Graphic,
+        // so it renders nothing and its sibling order is irrelevant. Created here rather than last
+        // because the loading overlay has to stay the top-most canvas child.
+        CreateUIObject(HomeSceneStamp, canvasGo.transform);
+
         // Title. "RoboSimL" is 8 glyphs and fits at full size on every canvas we target, so the
         // autosize range below no longer does any work — it is kept because it costs nothing and is
         // what stops a longer name from overflowing if this string is ever changed again. The app
@@ -402,6 +505,17 @@ public class BuildHomeScene
         title.enableAutoSizing = true;
         title.fontSizeMin = 52f;
         title.fontSizeMax = 96f;
+
+        // The app's name in the app's own gradient — white at the top falling to the icon's cyan,
+        // so the one piece of type nobody reads twice still says which app this is.
+        //
+        // TMP's OWN gradient, not the UiGradient component used everywhere else: TMP_Text builds
+        // its geometry itself and never runs uGUI's mesh modifiers, so a UiGradient here would
+        // attach cleanly, log nothing, and do nothing at all.
+        title.enableVertexGradient = true;
+        title.colorGradient = new VertexGradient(TextColor, TextColor,
+            PrimaryBottomColor, PrimaryBottomColor);
+
         RectTransform titleRect = title.rectTransform;
         titleRect.anchorMin = titleRect.anchorMax = new Vector2(0.5f, 1f);
         titleRect.pivot = new Vector2(0.5f, 1f);
@@ -434,7 +548,7 @@ public class BuildHomeScene
         // sliders and the drive-direction toggle, which belong with the controls and with the robot
         // respectively. A tab with two rows in it is a worse home for them than either.
         Button[] settingsTabs = CreateTabRow(settingsPanel, "SettingsTabs", TabRowHeight,
-            "Robot", "Controls", "Account");
+            out TabIndicator settingsTabIndicator, "Robot", "Controls", "Account");
 
         // The viewport is shared; only its content changes with the tab. Insets leave the tab row
         // above and the Back button below outside the scrolling area, so Back is always reachable
@@ -720,6 +834,18 @@ public class BuildHomeScene
         so.FindProperty("inboxMessageViewport").objectReferenceValue = inboxParts.messageViewport;
         so.FindProperty("inboxActionLabel").objectReferenceValue = inboxParts.unlockLabel;
 
+        // Runtime selection tints, written FROM the palette rather than kept in step with it by
+        // hand. These are serialized fields with C# defaults, so before this the palette and the
+        // tints were two independent copies of the same colours joined only by a comment — and a
+        // restyle that missed the second copy leaves the selected robot row painted in the old
+        // theme's blue while every other button has moved on.
+        //
+        // Note selected != primary: SelectedColor marks state ("this robot is chosen"), the
+        // primary gradient marks an action ("tap this"). They used to be the same blue.
+        so.FindProperty("settingsTabIndicator").objectReferenceValue = settingsTabIndicator;
+        so.FindProperty("selectedTint").colorValue = SelectedColor;
+        so.FindProperty("normalTint").colorValue = NeutralColor;
+
         // Controller config screen: same root object, wired to the diagram it opens.
         ControllerConfigScreen configScreen = homeRoot.AddComponent<ControllerConfigScreen>();
         SerializedObject configSo = new SerializedObject(configScreen);
@@ -744,6 +870,15 @@ public class BuildHomeScene
         configSo.FindProperty("cancelButton").objectReferenceValue = configParts.cancelButton;
         configSo.FindProperty("controlStyleButton").objectReferenceValue = configParts.controlStyleButton;
         configSo.FindProperty("resetDefaultsButton").objectReferenceValue = configParts.resetDefaultsButton;
+
+        // The config screen's four tints, from the same palette, for the same reason as above.
+        // "A button that has something mapped" and "a popup row already on this button" both mean
+        // CHOSEN, so both take SelectedColor; the popup row used to be a one-off green that
+        // appeared nowhere else in the app.
+        configSo.FindProperty("assignedTint").colorValue = SelectedColor;
+        configSo.FindProperty("unassignedTint").colorValue = NeutralColor;
+        configSo.FindProperty("selectedRowTint").colorValue = SelectedColor;
+        configSo.FindProperty("rowTint").colorValue = NeutralColor;
         configSo.ApplyModifiedPropertiesWithoutUndo();
 
         so.FindProperty("controllerConfig").objectReferenceValue = configScreen;
@@ -838,7 +973,7 @@ public class BuildHomeScene
         // something on top of the app instead of a screen the app has moved to. raycastTarget stays
         // true, which is what stops a tap landing on Drive through the dim.
         Image scrim = overlay.AddComponent<Image>();
-        scrim.color = new Color(BackgroundColor.r, BackgroundColor.g, BackgroundColor.b, 0.86f);
+        scrim.color = new Color(BackgroundTopColor.r, BackgroundTopColor.g, BackgroundTopColor.b, 0.86f);
         scrim.raycastTarget = true;
         parts.overlay = overlay;
 
@@ -954,7 +1089,7 @@ public class BuildHomeScene
         diagramRect.anchoredPosition = new Vector2(0f, -30f);
         diagramRect.sizeDelta = new Vector2(1560f, 700f);
         Image diagramImage = diagram.AddComponent<Image>();
-        diagramImage.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Background.psd");
+        diagramImage.sprite = HomeThemeSprites.Panel;
         diagramImage.type = Image.Type.Sliced;
         diagramImage.color = ListColor;
 
@@ -1053,7 +1188,7 @@ public class BuildHomeScene
 
         GameObject scroll = CreateUIObject("AssignmentScroll", assignmentPanel.transform);
         Image scrollImage = scroll.AddComponent<Image>(); // list backdrop + drag-catcher
-        scrollImage.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Background.psd");
+        scrollImage.sprite = HomeThemeSprites.Panel;
         scrollImage.type = Image.Type.Sliced;
         scrollImage.color = ListColor;
         scroll.AddComponent<RectMask2D>();
@@ -1112,7 +1247,7 @@ public class BuildHomeScene
         }
         else
         {
-            image.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
+            image.sprite = HomeThemeSprites.Button;
             image.type = Image.Type.Sliced;
         }
         image.color = NeutralColor;
@@ -1339,7 +1474,7 @@ public class BuildHomeScene
         previewRect.sizeDelta = new Vector2(1920f, 1080f);
         previewRect.localScale = new Vector3(0.7f, 0.7f, 1f); // 1344x756 on screen
         Image previewImage = preview.AddComponent<Image>();
-        previewImage.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Background.psd");
+        previewImage.sprite = HomeThemeSprites.Panel;
         previewImage.type = Image.Type.Sliced;
         previewImage.color = ListColor;
         previewImage.raycastTarget = false; // drags belong to the proxies, not the backdrop
@@ -1377,7 +1512,7 @@ public class BuildHomeScene
         rect.sizeDelta = info.previewSize;
 
         Image image = go.AddComponent<Image>();
-        image.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
+        image.sprite = HomeThemeSprites.Button;
         image.type = Image.Type.Sliced;
         image.color = AccentColor;
         // raycastTarget stays true: the image is the drag handle.
@@ -1415,9 +1550,9 @@ public class BuildHomeScene
 
         // Near-opaque dim backdrop; raycastTarget stays true so it blocks input to everything below.
         Image scrim = overlay.AddComponent<Image>();
-        scrim.color = new Color(BackgroundColor.r, BackgroundColor.g, BackgroundColor.b, 0.92f);
+        scrim.color = new Color(BackgroundTopColor.r, BackgroundTopColor.g, BackgroundTopColor.b, 0.92f);
 
-        // Spinner: a filled radial arc (a quarter of the Knob circle) rotated by LoadingSpinner.
+        // Spinner: a quarter-arc cut from the generated ring, rotated by LoadingSpinner.
         GameObject spinner = CreateUIObject("Spinner", overlay.transform);
         RectTransform spinnerRect = (RectTransform)spinner.transform;
         spinnerRect.anchorMin = spinnerRect.anchorMax = new Vector2(0.5f, 0.5f);
@@ -1425,12 +1560,19 @@ public class BuildHomeScene
         spinnerRect.anchoredPosition = new Vector2(0f, 50f);
         spinnerRect.sizeDelta = new Vector2(120f, 120f);
         Image spinnerImage = spinner.AddComponent<Image>();
-        spinnerImage.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Knob.psd");
-        spinnerImage.color = AccentColor;
+        spinnerImage.sprite = HomeThemeSprites.Spinner;
+        spinnerImage.color = Color.white; // white so the gradient below isn't tinted on the way out
         spinnerImage.type = Image.Type.Filled;
         spinnerImage.fillMethod = Image.FillMethod.Radial360;
         spinnerImage.fillAmount = 0.25f; // a spinning quarter-arc reads as "busy"
         spinnerImage.raycastTarget = false;
+
+        // The app's gradient, across the arc. UiGradient works in the graphic's own local space, so
+        // the colours turn WITH the spinner instead of staying pinned to the screen — the bright end
+        // chases the dark one around the circle, which is the whole point of putting it here.
+        UiGradient spinnerGradient = spinner.AddComponent<UiGradient>();
+        spinnerGradient.topColor = PrimaryTopColor;
+        spinnerGradient.bottomColor = PrimaryBottomColor;
         spinner.AddComponent<LoadingSpinner>();
 
         TextMeshProUGUI label = CreateText("LoadingLabel", overlay.transform, "Loading…", 44f);
@@ -1526,16 +1668,30 @@ public class BuildHomeScene
             Vector2 wasAnchoredPosition = existingRect.anchoredPosition;
             Vector2 wasSize = existingRect.sizeDelta;
 
+            // Re-apply the CURRENT skin. This button is the one control the builders create once and
+            // only ever find again, so a restyle reached every other button in the app and left this
+            // one behind — a square grey Home sitting in a row of rounded gradient buttons.
+            Image wasImage = existingHome.GetComponent<Image>();
+            TextMeshProUGUI homeLabel = existingHome.GetComponentInChildren<TextMeshProUGUI>(true);
+            bool themeChanged = wasImage == null || wasImage.sprite != HomeThemeSprites.Button ||
+                                (homeLabel != null && homeLabel.font != HomeThemeFonts.Regular);
+
             Undo.RecordObject(existingRect, "Move Home Button");
+            ApplyButtonTheme(existingHome.gameObject, AccentColor);
+            if (homeLabel != null)
+            {
+                homeLabel.font = HomeThemeFonts.Regular;
+                homeLabel.color = TextColor;
+            }
             PositionHomeButton(existingRect);
 
-            if (existingRect.pivot == wasPivot && existingRect.anchoredPosition == wasAnchoredPosition
-                && existingRect.sizeDelta == wasSize)
+            if (!themeChanged && existingRect.pivot == wasPivot &&
+                existingRect.anchoredPosition == wasAnchoredPosition && existingRect.sizeDelta == wasSize)
                 return "already present";
 
             EditorSceneManager.MarkSceneDirty(sampleScene);
             added = true; // reuse the flag so the caller saves the scene
-            return "re-positioned to the top center";
+            return themeChanged ? "re-themed to the current skin" : "re-positioned to the top center";
         }
 
         Button homeButton = CreateButton("HomeButton", canvasGo.transform, "Home", 32f, AccentColor);
@@ -1576,6 +1732,24 @@ public class BuildHomeScene
         return null;
     }
 
+    // The same search over plain Transforms, for the scene's NON-UI objects.
+    //
+    // FindDescendantRect above walks RectTransforms, so it is blind to anything that isn't a UI
+    // element — a camera, a light, the inactive holder the showcase robot is built under. Gating a
+    // rebuild on one of those with the Rect version silently never matches, which reads exactly
+    // like the check passing.
+    internal static Transform FindDescendantTransform(Scene scene, string name)
+    {
+        foreach (GameObject root in scene.GetRootGameObjects())
+        {
+            foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (child.name == name) return child;
+            }
+        }
+        return null;
+    }
+
     // --- UI building helpers ---
 
     internal static GameObject CreateUIObject(string name, Transform parent)
@@ -1586,7 +1760,13 @@ public class BuildHomeScene
         return go;
     }
 
-    // Centered panel with a dark sliced background.
+    // Centered panel: a rounded, opaque surface with a soft shadow around it.
+    //
+    // The shadow is baked into the sprite rather than being a second object. A child would draw ON
+    // TOP of this object's own Image (uGUI draws a parent's graphic before its children), and a
+    // sibling behind it would have to be kept in step with the panel's rect by hand — which the two
+    // panels that stretch to the canvas height would immediately break. Baked in, it follows the
+    // panel for free and costs no extra draw call. See HomeThemeSprites for how the tint survives.
     private static GameObject CreatePanel(string name, Transform parent, Vector2 size)
     {
         GameObject go = CreateUIObject(name, parent);
@@ -1596,9 +1776,20 @@ public class BuildHomeScene
         rect.anchoredPosition = Vector2.zero;
         rect.sizeDelta = size;
         Image image = go.AddComponent<Image>();
-        image.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Background.psd");
+        image.sprite = HomeThemeSprites.Panel;
         image.type = Image.Type.Sliced;
-        image.color = PanelColor;
+        // White, with the gradient supplying the colour — UiGradient multiplies into this, so
+        // tinting here as well would square the navy. Same arrangement as a primary button.
+        image.color = Color.white;
+        UiGradient gradient = go.AddComponent<UiGradient>();
+        gradient.topColor = PanelTopColor;
+        gradient.bottomColor = PanelColor;
+
+        // Every panel arrives instead of blinking on. The controller shows and hides these with a
+        // raw SetActive, which fires OnEnable — so the transition needs no cooperation from
+        // HomeScreenController at all, and nothing in it has to be kept in step with this.
+        go.AddComponent<CanvasGroup>();
+        go.AddComponent<PanelTransition>();
         return go;
     }
 
@@ -1708,6 +1899,14 @@ public class BuildHomeScene
         AddVerticalLayout(page, 24, 20f);
         ContentSizeFitter fitter = page.AddComponent<ContentSizeFitter>();
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        // Cross-fade between tabs. Fade ONLY: this object is the ScrollRect's content, so its
+        // anchoredPosition is the scroll position and animating it would drag the page back up
+        // under the player's finger. fromScale 1 + fromOffset zero is what turns that off.
+        page.AddComponent<CanvasGroup>();
+        PanelTransition transition = page.AddComponent<PanelTransition>();
+        transition.fromScale = 1f;
+        transition.fromOffset = Vector2.zero;
         return page;
     }
 
@@ -1722,8 +1921,8 @@ public class BuildHomeScene
     {
         var resources = new DefaultControls.Resources
         {
-            standard = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd"),
-            background = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Background.psd"),
+            standard = HomeThemeSprites.Button,
+            background = HomeThemeSprites.Panel,
         };
         GameObject go = DefaultControls.CreateScrollbar(resources);
         go.name = name;
@@ -1749,12 +1948,13 @@ public class BuildHomeScene
 
         Image track = go.GetComponent<Image>();
         if (track != null) track.color = ListColor;
-        TintChildImage(go, "Sliding Area/Handle", new Color(0.52f, 0.56f, 0.66f, 1f));
+        TintChildImage(go, "Sliding Area/Handle", BorderColor);
         return bar;
     }
 
     // A row of tab buttons pinned across the top of a panel. Returns them in the order given.
-    private static Button[] CreateTabRow(GameObject panel, string name, float height, params string[] labels)
+    private static Button[] CreateTabRow(GameObject panel, string name, float height,
+        out TabIndicator indicator, params string[] labels)
     {
         GameObject row = CreateUIObject(name, panel.transform);
         RectTransform rect = (RectTransform)row.transform;
@@ -1775,11 +1975,38 @@ public class BuildHomeScene
         layout.childForceExpandHeight = true;
 
         var buttons = new Button[labels.Length];
+        var tabRects = new RectTransform[labels.Length];
         for (int i = 0; i < labels.Length; i++)
         {
             buttons[i] = CreateButton("SettingsTab_" + labels[i].Replace(" ", string.Empty),
                 row.transform, labels[i], 32f, NeutralColor);
+            tabRects[i] = (RectTransform)buttons[i].transform;
         }
+
+        // The sliding underline. Built AFTER the tabs so it draws over them, and given an ignored
+        // LayoutElement so the HorizontalLayoutGroup above treats it as not being there — without
+        // that the group would count it as a fourth tab and squeeze the real three.
+        GameObject bar = CreateUIObject(name + "Indicator", row.transform);
+        RectTransform barRect = (RectTransform)bar.transform;
+        barRect.anchorMin = barRect.anchorMax = new Vector2(0.5f, 0f);
+        barRect.pivot = new Vector2(0.5f, 0f);
+        barRect.anchoredPosition = new Vector2(0f, 4f);
+        barRect.sizeDelta = new Vector2(120f, 4f);
+        LayoutElement barLayout = bar.AddComponent<LayoutElement>();
+        barLayout.ignoreLayout = true;
+        Image barImage = bar.AddComponent<Image>();
+        barImage.sprite = HomeThemeSprites.Button;
+        barImage.type = Image.Type.Sliced;
+        barImage.color = SelectedColor;
+        barImage.raycastTarget = false; // the tab under it takes the tap
+
+        indicator = bar.AddComponent<TabIndicator>();
+        SerializedObject indicatorSo = new SerializedObject(indicator);
+        SerializedProperty tabsProp = indicatorSo.FindProperty("tabs");
+        tabsProp.arraySize = tabRects.Length;
+        for (int i = 0; i < tabRects.Length; i++)
+            tabsProp.GetArrayElementAtIndex(i).objectReferenceValue = tabRects[i];
+        indicatorSo.ApplyModifiedPropertiesWithoutUndo();
         return buttons;
     }
 
@@ -1830,7 +2057,7 @@ public class BuildHomeScene
     {
         GameObject column = CreateUIObject(columnName, parent);
         Image fill = column.AddComponent<Image>();
-        fill.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Background.psd");
+        fill.sprite = HomeThemeSprites.Panel;
         fill.type = Image.Type.Sliced;
         fill.color = ListColor;
         VerticalLayoutGroup columnLayout = AddVerticalLayout(column, 12, 10f);
@@ -1839,7 +2066,7 @@ public class BuildHomeScene
         TextMeshProUGUI header = CreateText(columnName + "Title", column.transform,
             title.ToUpperInvariant(), 24f);
         header.fontStyle = FontStyles.Bold;
-        header.color = new Color(TextColor.r, TextColor.g, TextColor.b, 0.62f);
+        header.color = TextMutedColor;
         SetLayoutHeight(header.gameObject, 32f);
 
         GameObject viewport = CreateUIObject(columnName + "Viewport", column.transform);
@@ -1892,7 +2119,7 @@ public class BuildHomeScene
         TextMeshProUGUI label = CreateText(name, parent, text.ToUpperInvariant(), 28f);
         label.fontStyle = FontStyles.Bold;
         label.alignment = TextAlignmentOptions.MidlineLeft;
-        label.color = new Color(TextColor.r, TextColor.g, TextColor.b, 0.62f);
+        label.color = TextMutedColor;
         SetLayoutHeight(label.gameObject, 40f);
 
         GameObject rule = CreateUIObject(name + "Rule", parent);
@@ -1913,6 +2140,13 @@ public class BuildHomeScene
     {
         GameObject go = CreateUIObject(name, parent);
         TextMeshProUGUI tmp = go.AddComponent<TextMeshProUGUI>();
+        // Assigned explicitly rather than by changing TMP_Settings.defaultFontAsset: this covers
+        // every label BOTH scene builders make (Build Drive Controls calls through here too),
+        // without reaching into a global setting that also governs objects these tools don't own.
+        //
+        // Only the regular face is set. Labels that want bold keep saying fontStyle = Bold, and
+        // HomeThemeFonts.LinkBoldWeight has made that resolve to the real SemiBold face.
+        tmp.font = HomeThemeFonts.Regular;
         tmp.text = text;
         tmp.fontSize = fontSize;
         tmp.color = TextColor;
@@ -1923,12 +2157,9 @@ public class BuildHomeScene
     internal static Button CreateButton(string name, Transform parent, string label, float fontSize, Color color)
     {
         GameObject go = CreateUIObject(name, parent);
-        Image image = go.AddComponent<Image>();
-        image.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
-        image.type = Image.Type.Sliced;
-        image.color = color;
         Button button = go.AddComponent<Button>();
-        button.targetGraphic = image;
+        ApplyButtonTheme(go, color);
+        button.targetGraphic = go.GetComponent<Image>();
 
         TextMeshProUGUI text = CreateText("Label", go.transform, label, fontSize);
         text.raycastTarget = false; // clicks belong to the button, not the label
@@ -1940,14 +2171,81 @@ public class BuildHomeScene
         return button;
     }
 
+    // Everything about how a button LOOKS: sprite, fill, and press behaviour.
+    //
+    // Split out of CreateButton because one button in the app is created once and only ever found
+    // afterwards — the field scene's Home button, which EnsureFieldHomeButton returns early for when
+    // it already exists. With the theme inlined in CreateButton there was no way to re-apply it, so
+    // Home stayed the single square grey control in a field of rounded ones, which is exactly how it
+    // was spotted.
+    //
+    // Find-or-add throughout, so re-running over a button that already has these components
+    // re-themes it instead of stacking a second copy.
+    internal static void ApplyButtonTheme(GameObject go, Color color)
+    {
+        Image image = go.GetComponent<Image>() ?? go.AddComponent<Image>();
+        image.sprite = HomeThemeSprites.Button;
+        image.type = Image.Type.Sliced;
+
+        // A button asking for the accent colour IS a primary action — that has been this file's
+        // convention since it was written, and every call site already follows it. So the gradient
+        // keys off the colour rather than off a new parameter threaded through a dozen callers.
+        //
+        // The Image's own colour stays WHITE for a gradient button and the gradient supplies the
+        // colour, because UiGradient multiplies into it. Tinting both would square the blue.
+        bool primary = color == AccentColor;
+        UiGradient gradient = go.GetComponent<UiGradient>();
+        if (primary)
+        {
+            image.color = Color.white;
+            if (gradient == null) gradient = go.AddComponent<UiGradient>();
+            gradient.topColor = PrimaryTopColor;
+            gradient.bottomColor = PrimaryBottomColor;
+        }
+        else
+        {
+            image.color = color;
+            // A button that USED to be primary would otherwise keep multiplying the old gradient
+            // over its new flat colour.
+            if (gradient != null) UnityEngine.Object.DestroyImmediate(gradient);
+        }
+        AddPressFeedback(go, primary);
+    }
+
+    // Gives a button the same press feel the field-scene controls have had all along: it sinks in,
+    // shrinks slightly, and shifts colour while held. The home screen had NONE of this — every one
+    // of its buttons relied on the stock ColorTint transition, a ~0.78 multiply that is close to
+    // invisible on the accent blue, so tapping Drive gave no acknowledgement at all.
+    //
+    // The Button's own transition goes to None, because PressFeedback drives the colour and the two
+    // would otherwise fight over the same Image. That has a consequence worth knowing: a
+    // non-interactable button no longer greys itself out for free. Anything that sets
+    // `interactable` must paint its own disabled state, and must do it through
+    // PressFeedback.BaseColor — see SubmitRobotScreen, and MatchLoadButton for the pattern.
+    private static void AddPressFeedback(GameObject go, bool primary)
+    {
+        Button button = go.GetComponent<Button>();
+        if (button != null) button.transition = Selectable.Transition.None;
+        PressFeedback feedback = go.GetComponent<PressFeedback>() ?? go.AddComponent<PressFeedback>();
+
+        // PressFeedback MULTIPLIES its pressed colour into the graphic, so which way a press reads
+        // depends on what the graphic's base colour is:
+        //   - a neutral button is a dark flat fill, so a near-white pressed colour brightens it;
+        //   - a primary button is WHITE with the gradient supplying the colour (multiply can't go
+        //     above white), so the same value would do nothing. It gets a darkening instead, which
+        //     is the conventional direction for a press anyway.
+        feedback.pressedColor = primary ? new Color(0.74f, 0.78f, 0.86f, 1f)
+                                        : new Color(0.85f, 0.90f, 1.00f, 1f);
+    }
+
     // Horizontal slider built from Unity's DefaultControls (same structure as GameObject > UI >
     // Slider) so the Background/Fill/Handle wiring is correct, then themed to match the panel.
     private static Slider CreateSlider(string name, Transform parent, float min, float max, float value)
     {
         var resources = new DefaultControls.Resources
         {
-            standard = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd"),
-            background = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Background.psd"),
+            standard = HomeThemeSprites.Button,
+            background = HomeThemeSprites.Panel,
             knob = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Knob.psd"),
         };
 
@@ -1977,8 +2275,8 @@ public class BuildHomeScene
     {
         var resources = new DefaultControls.Resources
         {
-            standard = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd"),
-            background = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Background.psd"),
+            standard = HomeThemeSprites.Button,
+            background = HomeThemeSprites.Panel,
             checkmark = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Checkmark.psd"),
         };
 
@@ -1995,7 +2293,7 @@ public class BuildHomeScene
         background.pivot = new Vector2(0f, 0.5f);
         background.anchoredPosition = new Vector2(8f, 0f);
         background.sizeDelta = new Vector2(48f, 48f);
-        background.GetComponent<Image>().color = new Color(0.82f, 0.85f, 0.92f, 1f);
+        background.GetComponent<Image>().color = new Color32(0xD8, 0xE3, 0xF7, 0xFF);
         RectTransform checkmark = (RectTransform)background.Find("Checkmark");
         checkmark.anchorMin = Vector2.zero;
         checkmark.anchorMax = Vector2.one;
@@ -2029,7 +2327,7 @@ public class BuildHomeScene
     {
         var resources = new TMP_DefaultControls.Resources
         {
-            standard = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd"),
+            standard = HomeThemeSprites.Button,
             inputField = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/InputFieldBackground.psd"),
         };
 

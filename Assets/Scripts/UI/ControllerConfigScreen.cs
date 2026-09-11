@@ -240,7 +240,7 @@ public class ControllerConfigScreen : MonoBehaviour
         row.gameObject.SetActive(true); // template itself stays inactive
         TMP_Text text = row.GetComponentInChildren<TMP_Text>(true);
         if (text != null) text.text = label;
-        if (row.image != null) row.image.color = selected ? selectedRowTint : rowTint;
+        PressFeedback.Tint(row, selected ? selectedRowTint : rowTint); // not row.image — see PressFeedback.Tint
         row.onClick.AddListener(onClick);
         spawnedRows.Add(row.gameObject);
     }
@@ -357,8 +357,8 @@ public class ControllerConfigScreen : MonoBehaviour
 
         if (index < assignmentLabels.Length && assignmentLabels[index] != null)
             assignmentLabels[index].text = string.Join("\n", lines);
-        if (index < buttons.Length && buttons[index] != null && buttons[index].image != null)
-            buttons[index].image.color = shown > 0 ? assignedTint : unassignedTint;
+        if (index < buttons.Length)
+            PressFeedback.Tint(buttons[index], shown > 0 ? assignedTint : unassignedTint);
     }
 
     // A mechanism whose display name never got set would otherwise render as a bare " — Forward

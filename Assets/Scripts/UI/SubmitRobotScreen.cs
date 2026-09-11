@@ -231,12 +231,48 @@ public class SubmitRobotScreen : MonoBehaviour
         RefreshSendButton();
     }
 
+    // What a disabled button's colour is multiplied by. Enough to read as "not now" at a glance
+    // without making the button look like it has vanished.
+    private const float DisabledDim = 0.45f;
+
+    // Each button's colour while it IS usable, captured the first time we touch it. Captured
+    // rather than authored here so this screen doesn't need its own copy of the palette — and so
+    // it keeps working if BuildHomeScene's colours change.
+    private readonly Dictionary<Button, Color> enabledColors = new Dictionary<Button, Color>();
+
+    // Set a button's interactable state AND paint it, because nothing else will.
+    //
+    // BuildHomeScene gives every button a PressFeedback and turns its Button.transition off, so
+    // the stock ColorTint disabled state never runs — a dead button used to look exactly like a
+    // live one. (The same thing bit MatchLoadButton, which had been setting `interactable` for
+    // months with no visible effect.) The colour has to go through PressFeedback.Tint too, or
+    // PressFeedback lerps it straight back to the enabled colour within a few frames.
+    private void SetInteractable(Button button, bool on)
+    {
+        if (button == null) return;
+        button.interactable = on;
+
+        if (!enabledColors.TryGetValue(button, out Color enabled))
+        {
+            PressFeedback feedback = button.GetComponent<PressFeedback>();
+            enabled = feedback != null ? feedback.BaseColor
+                    : button.targetGraphic != null ? button.targetGraphic.color
+                    : Color.white;
+            enabledColors[button] = enabled;
+        }
+
+        // Multiplied rather than replaced with a fixed grey: Send is a gradient button whose own
+        // colour is white, so a flat grey would erase the gradient rather than dim it.
+        Color dimmed = new Color(enabled.r * DisabledDim, enabled.g * DisabledDim,
+                                 enabled.b * DisabledDim, enabled.a);
+        PressFeedback.Tint(button, on ? enabled : dimmed);
+    }
+
     private void RefreshSendButton()
     {
-        if (sendButton != null)
-            sendButton.interactable = !sending && !string.IsNullOrEmpty(selectedPath);
-        if (chooseFileButton != null) chooseFileButton.interactable = !sending;
-        if (sharingButton != null) sharingButton.interactable = !sending;
+        SetInteractable(sendButton, !sending && !string.IsNullOrEmpty(selectedPath));
+        SetInteractable(chooseFileButton, !sending);
+        SetInteractable(sharingButton, !sending);
     }
 
     private void SetProgress(float value)

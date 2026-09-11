@@ -34,6 +34,31 @@ internal static class RoboSimPaths
     // Where the playable robot prefabs live.
     public const string RobotsFolder = "Assets/Robots";
 
+    // The UI's generated sprites — rounded panel, rounded button, soft radial shadow. Written by
+    // HomeThemeSprites rather than authored, so the corner radius is a constant in that file
+    // instead of a texture that has to be re-cut by hand. Both scene builders read them, which is
+    // why the paths live here and not in either of them.
+    public const string UiSpritesFolder = "Assets/UI/Generated";
+    public const string UiPanelSprite = UiSpritesFolder + "/RoundedPanel.png";
+    public const string UiButtonSprite = UiSpritesFolder + "/RoundedButton.png";
+    public const string UiShadowSprite = UiSpritesFolder + "/SoftShadow.png";
+    public const string UiSpinnerSprite = UiSpritesFolder + "/SpinnerRing.png";
+
+    // The UI's typeface. The TTFs and their OFL licence are committed; the TMP font assets beside
+    // them are baked from those by HomeThemeFonts. Both are committed rather than generated on a
+    // fresh clone, because the scene references a font asset by GUID and a regenerated one would
+    // get a new GUID — leaving every label in the app pointing at nothing.
+    public const string UiFontsFolder = "Assets/UI/Fonts";
+    public const string UiFontRegularSource = UiFontsFolder + "/Inter-Regular.ttf";
+    public const string UiFontBoldSource = UiFontsFolder + "/Inter-SemiBold.ttf";
+    public const string UiFontRegular = UiFontsFolder + "/Inter-Regular SDF.asset";
+    public const string UiFontBold = UiFontsFolder + "/Inter-SemiBold SDF.asset";
+
+    // TextMesh Pro's bundled default, kept as the fallback for characters the baked atlas has no
+    // glyph for — player-typed text (robot codes, team and robot names) can contain anything.
+    public const string LiberationSansFont =
+        "Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF.asset";
+
     // The match-load piece prefabs the loaders spawn.
     public const string MatchLoadPrefabsFolder = "Assets/Models/MatchLoadPreFabs";
 
