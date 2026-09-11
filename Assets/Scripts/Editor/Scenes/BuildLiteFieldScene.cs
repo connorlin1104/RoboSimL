@@ -25,12 +25,16 @@ using Scene = UnityEngine.SceneManagement.Scene;
 //
 //     (-X,+Z)  one cup with four pins lying flat around it   (+X,+Z)  an alliance goal (the short one)
 //     (-X,-Z)  three cups in a row against the wall with     (+X,-Z)  a neutral goal (the mid stake)
-//              one pin standing in the middle cup
+//              one pin standing in the middle cup                     and the roller on the wall
+//                                                                     behind it
 //     centre   the tall central stake, and one cup with a pin standing in it
 //
+// Both neutral goals — the tall central stake and the mid one — keep the pin standing in them, the
+// way the full field loads them. The alliance goal is bare there too.
+//
 // and on the perimeter, which is shared ground rather than any one quadrant's: all four walls, all
-// four corners, all four white tape lines, one roller, and one match loader — the one nearest the
-// spawn, still wired to its own tape.
+// four corners, all four white tape lines, and one match loader — the one nearest the spawn, still
+// wired to its own tape.
 //
 // Structures are found by GEOMETRY, not by name: "three cups within a row's span of each other with an
 // upright pin in the middle one" survives a re-authored or renamed field, where a name list would
@@ -197,17 +201,29 @@ public class BuildLiteFieldScene
         // can sit beside the central stake without crowding it — which also stages it for scoring.
         Structure stack = NearestStructure(StackedSingles(cups, pins), surface.center);
 
+        // The pin standing in each kept goal. These are pieces like any other and live in the Pins
+        // group rather than under the goal, so without this the piece prune takes them and the lite
+        // field's stakes start bare — which is not how a match starts and not how the full field looks.
+        List<Structure> goalStacks = GoalStacks(keptGoals, pins);
+
         var keptPieces = new List<Transform>();
         Collect(keptPieces, row);
         Collect(keptPieces, ring);
         Collect(keptPieces, stack);
+        foreach (Structure loaded in goalStacks) Collect(keptPieces, loaded);
         KeepOnly(Nodes(cups), keptPieces, cupsGroup, "cups", report);
         KeepOnly(Nodes(pins), keptPieces, pinsGroup, "pins", report);
 
-        // The roller and the match loader are things the driver has to reach, so those two are kept
-        // nearest the spawn rather than spread out.
+        // The match loader is something the driver has to reach, so it is kept nearest the spawn.
+        //
+        // The roller deliberately is NOT. Nearest-the-spawn put it on the same wall as the loader,
+        // the neutral goal and the alliance goal, so one side of the field carried every feature and
+        // the other was bare floor. It goes with the neutral goal instead: the two of them give that
+        // quadrant something to turn and something to score on, and the drive to reach it is the
+        // point rather than a cost.
         List<Transform> rollers = InstancesOf<RollerSnap>(rollersGroup);
-        Transform roller = NearestTo(rollers, spawn);
+        Vector3 rollerAnchor = neutralGoal != null ? WorldCenter(neutralGoal) : Quadrant(surface, 1f, -1f);
+        Transform roller = NearestTo(rollers, rollerAnchor);
         KeepOnly(rollers, new List<Transform> { roller }, rollersGroup, "roller", report);
 
         List<Transform> loaders = InstancesOf<MatchLoaderController>(loadersGroup);
@@ -224,10 +240,12 @@ public class BuildLiteFieldScene
 
         report.AppendLine("  layout:");
         report.AppendLine($"    centre        {Name(centralGoal)} (the tall stake) + {Label(stack)}");
-        report.AppendLine($"    {Where(surface, neutralGoal)}  {Name(neutralGoal)} (neutral goal)");
+        report.AppendLine($"    {Where(surface, neutralGoal)}  {Name(neutralGoal)} (neutral goal) + {Name(roller)} (roller)");
         report.AppendLine($"    {Where(surface, allianceGoal)}  {Name(allianceGoal)} (alliance goal)");
         report.AppendLine($"    {Where(surface, row)}  {Label(row)} (three cups against the wall, pin in the middle)");
         report.AppendLine($"    {Where(surface, ring)}  {Label(ring)} (cup ringed by four pins lying flat)");
+        foreach (Structure loaded in goalStacks)
+            report.AppendLine($"    loaded        {Label(loaded)}");
 
         return new Kept
         {
@@ -236,7 +254,7 @@ public class BuildLiteFieldScene
             TapeLines = tapeLines,
             Goals = CountNonNull(keptGoals),
             Cups = CountCups(row) + CountCups(ring) + CountCups(stack),
-            Pins = CountPins(row) + CountPins(ring) + CountPins(stack),
+            Pins = CountPins(row) + CountPins(ring) + CountPins(stack) + CountPins(goalStacks),
         };
     }
 
@@ -626,6 +644,37 @@ public class BuildLiteFieldScene
         return stacks;
     }
 
+    // The pin standing IN a goal, found the same way StackedSingles finds the pin standing in a cup.
+    //
+    // Every neutral goal on the shipped field is loaded with one yellow-yellow pin and every alliance
+    // goal is bare, so this returns one structure per neutral goal and nothing for the others — which
+    // is the arrangement the lite field should inherit rather than a set of empty stakes.
+    //
+    // Measured on the shipped field: each of those pins sits 0.02-0.03 from its goal's centre, so
+    // PinInCupRadius (0.4) separates them from everything else by a wide margin. The nearest piece
+    // that is NOT in a goal is the lone cup beside the central stake, 5.98 away.
+    private static List<Structure> GoalStacks(List<Transform> goals, List<Piece> pins)
+    {
+        var stacks = new List<Structure>();
+        if (goals == null) return stacks;
+
+        foreach (Transform goal in goals)
+        {
+            if (goal == null) continue;
+
+            // A Piece standing in for the goal, so PinIn does the measuring in one place. Upright is
+            // left false: it is only read of PINS, never of what they are standing in.
+            var seat = new Piece { Node = goal, Center = WorldCenter(goal) };
+            Piece standing = PinIn(seat, pins);
+            if (standing == null) continue; // an alliance goal: nothing is loaded on it
+
+            var structure = new Structure { Label = $"{goal.name} + {standing.Node.name}", Center = seat.Center };
+            structure.Pins.Add(standing.Node);
+            stacks.Add(structure);
+        }
+        return stacks;
+    }
+
     private static bool HasNeighbourCup(Piece cup, List<Piece> cups)
     {
         foreach (Piece other in cups)
@@ -902,6 +951,18 @@ public class BuildLiteFieldScene
             $"expected 1 cup ringed by pins lying flat, found {rings.Count}");
         Expect(problems, stacks.Count == 1,
             $"expected 1 lone cup with a pin standing in it, found {stacks.Count}");
+
+        // The neutral goals are the ones loaded with a pin; the alliance goal is bare. Neutral means
+        // every band but the shortest, so that is what gets checked — a property of the saved scene
+        // rather than a number carried over from the prune. This is worth its own check because those
+        // pins sit in the Pins group and not under the goal, so the piece prune is free to take them
+        // and leave the stakes empty, which is what it did until GoalStacks was added.
+        var loadedGoals = new List<Transform>();
+        for (int band = 0; band + 1 < bands.Count; band++) loadedGoals.AddRange(bands[band]);
+        List<Structure> goalStacks = GoalStacks(loadedGoals, pins);
+        Expect(problems, goalStacks.Count == loadedGoals.Count,
+            $"{loadedGoals.Count - goalStacks.Count} of the {loadedGoals.Count} neutral goal(s) has no " +
+            "pin standing in it — the piece prune took it, so the lite field's stakes start bare");
         Expect(problems, cups.Count == expected.Cups,
             $"expected {expected.Cups} cups, found {cups.Count}");
         Expect(problems, pins.Count == expected.Pins,
@@ -912,6 +973,7 @@ public class BuildLiteFieldScene
         foreach (Structure structure in rows) { accountedCups += structure.Cups.Count; accountedPins += structure.Pins.Count; }
         foreach (Structure structure in rings) { accountedCups += structure.Cups.Count; accountedPins += structure.Pins.Count; }
         foreach (Structure structure in stacks) { accountedCups += structure.Cups.Count; accountedPins += structure.Pins.Count; }
+        foreach (Structure structure in goalStacks) accountedPins += structure.Pins.Count;
         Expect(problems, accountedCups == cups.Count && accountedPins == pins.Count,
             $"{cups.Count - accountedCups} cup(s) and {pins.Count - accountedPins} pin(s) are not part of " +
             "any structure — a structure was cut in half, or a stray piece survived");
@@ -1074,5 +1136,15 @@ public class BuildLiteFieldScene
     private static int CountPins(Structure structure)
     {
         return structure != null ? structure.Pins.Count : 0;
+    }
+
+    private static int CountPins(List<Structure> structures)
+    {
+        int total = 0;
+        if (structures != null)
+        {
+            foreach (Structure structure in structures) total += CountPins(structure);
+        }
+        return total;
     }
 }

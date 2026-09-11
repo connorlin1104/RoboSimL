@@ -201,7 +201,9 @@ public static class BuildDriveControls
         rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 1f);
         rect.pivot = new Vector2(0.5f, 1f);
         rect.anchoredPosition = new Vector2(0f, -96f);
-        rect.sizeDelta = new Vector2(200f, 64f);
+        // The same size as the row above it. It used to be 20 units wider, which is too small a
+        // difference to read as deliberate and just looks like one button is off.
+        rect.sizeDelta = TopButtonSize;
         EnsureComponent<MatchLoadButton>(button.gameObject);
     }
 
