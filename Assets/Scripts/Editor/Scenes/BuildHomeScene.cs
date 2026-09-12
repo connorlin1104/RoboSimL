@@ -52,7 +52,7 @@ public class BuildHomeScene
     // A version stamp turns "did I remember to add a check for this?" — a judgement call that has
     // to be made correctly every time — into a one-line bump. It is also the ONLY thing that can
     // catch a change with no object footprint at all, which an added component is.
-    internal const string HomeSceneStamp = "HomeSceneStamp_v4";
+    internal const string HomeSceneStamp = "HomeSceneStamp_v6";
 
     // The theme, derived from the app icon (Assets/Icons/AppIcon.png) rather than invented.
     //
@@ -106,21 +106,29 @@ public class BuildHomeScene
 
     // The home screen is two columns: a stage on the left and the menu docked right.
     //
-    // The menu is a FIXED 900 rather than a fraction of the canvas, because CreateSliderRow hard-
-    // codes its label column at 340 units — a menu that narrowed with the screen would crush the
-    // sliders on the narrow one. 900 is 42% of a 6.5" phone's canvas and 54% of a 13" iPad's, so
-    // the stage absorbs the aspect difference instead of the settings rows doing it.
+    // A FRACTION of the canvas width, not a fixed number of units. A fixed 900 was tried first and
+    // is what a reader would expect here, because CreateSliderRow hard-codes its label column at
+    // 340 units and a menu that narrows with the screen could crush the sliders. But 900 is 42% of
+    // a 6.5" phone's canvas and 54% of a 13" iPad's, and that difference is plainly visible: the
+    // same screen reads as menu-on-the-right on one device and split-down-the-middle on the other.
+    //
+    // 0.45 holds the proportion identical everywhere and still leaves the narrowest target — the
+    // iPad's 1663-unit canvas — a 724-wide menu: 666 of interior, which is the 340 label, the 16
+    // gap and 310 of slider. The phone gets 929. The stage takes the aspect difference instead,
+    // 1117 against 867, which is exactly where a difference in screen shape belongs.
     //
     // What makes this cheap: the settings panel's entire interior — tab row, viewport, scrollbar,
     // Back button, layout groups — is anchored against the PANEL's rect, never the canvas. Moving
-    // the panel moves all of it, so not one row, tab or scroll needs touching.
-    private const float MenuWidth = 900f;
+    // or resizing the panel moves all of it, so not one row, tab or scroll needs touching.
+    private const float MenuFraction = 0.45f;
+
+    // The button row pinned to the bottom of the two full-bleed sub-screens, and the clearance the
+    // dark content area above it keeps. 18 was the inset before and read as none: at that height the
+    // buttons touch the panel's rounded bottom edge and very nearly touch the backdrop above them.
+    private const float BottomRowInset = 28f;
+    private const float BottomRowHeight = 64f;
     private const float StageGutter = 24f;   // between stage and menu, and at the screen edges
     private const float StageMargin = 40f;   // top and bottom
-
-    // How far the stage's contents sit below its centre, to stay centred in the space the title
-    // is not using.
-    private const float StageContentDrop = -70f;
 
     // Muted text — section headers, column titles, hints. Was written out as
     // "new Color(TextColor.r, TextColor.g, TextColor.b, 0.62f)" at six separate call sites.
@@ -269,9 +277,15 @@ public class BuildHomeScene
         if (FindDescendantRect(scene, "SettingsTabsIndicator") == null) return false;
         // The split: the stage on the left, the menu docked right. Both panels are REPARENTED into
         // MenuColumn, so a scene built before the split still has them centred on the canvas while
-        // every serialized ref below it still reads as wired.
+        // every serialized ref below it still reads as wired. HomeStage arrived later still, as the
+        // wrapper holding the stage and the title together so the sub-screens can hide both.
+        if (FindDescendantRect(scene, "HomeStage") == null) return false;
         if (FindDescendantRect(scene, "StageRegion") == null) return false;
         if (FindDescendantRect(scene, "MenuColumn") == null) return false;
+        // The two sub-screens size their dark content area to the panel now instead of carrying an
+        // authored scale measured against one canvas height. No serialized ref, so check the object.
+        if (FindDescendantRect(scene, "ConfigDiagramArea") == null) return false;
+        if (FindDescendantRect(scene, "LayoutPreviewArea") == null) return false;
 
         // Structural checks for things that have no serialized reference of their own. The tab row
         // and the scrollbar are pure hierarchy, so without these a pre-tabs HomeScene would report
@@ -322,7 +336,7 @@ public class BuildHomeScene
         SerializedObject configSo = new SerializedObject(configScreen);
         return IsRefSet(so, "catalog") && IsRefSet(so, "controllerConfig") &&
                IsRefSet(so, "controlsLayout") && IsRefSet(so, "loadingOverlay") &&
-               IsRefSet(so, "homeStage") &&
+               IsRefSet(so, "homeStage") && IsRefSet(so, "titleDock") &&
                IsRefSet(so, "publicModelListParent") && IsRefSet(so, "privateModelListParent") &&
                IsRefSet(so, "privateEmptyLabel") && IsRefSet(so, "modelButtonTemplate") &&
                IsRefSet(so, "publicListViewport") && IsRefSet(so, "privateListViewport") &&
@@ -519,26 +533,40 @@ public class BuildHomeScene
         // because the loading overlay has to stay the top-most canvas child.
         CreateUIObject(HomeSceneStamp, canvasGo.transform);
 
+        // Everything that is NOT the menu: the stage region and the title. One wrapper rather than
+        // two canvas children because the three full-bleed screens hide all of it together, and a
+        // controller holding two refs to keep in step is a worse version of holding one.
+        //
+        // Spans the whole canvas, so the title can be centred on the SCREEN with a plain anchor
+        // while the stage inside it keeps to the left. Carries no Graphic, so it costs no draw call
+        // and swallows no taps.
+        GameObject homeStage = CreateUIObject("HomeStage", canvasGo.transform);
+        RectTransform homeStageRect = (RectTransform)homeStage.transform;
+        homeStageRect.anchorMin = Vector2.zero;
+        homeStageRect.anchorMax = Vector2.one;
+        homeStageRect.offsetMin = Vector2.zero;
+        homeStageRect.offsetMax = Vector2.zero;
+
         // The stage: everything left of the menu. Empty of its own graphics — it is a region, and
         // what fills it is parented in. Stage 3 puts the robot's RenderTexture here.
-        GameObject stageRegion = CreateUIObject("StageRegion", canvasGo.transform);
+        GameObject stageRegion = CreateUIObject("StageRegion", homeStage.transform);
         RectTransform stageRect = (RectTransform)stageRegion.transform;
         stageRect.anchorMin = Vector2.zero;
-        stageRect.anchorMax = Vector2.one;
+        stageRect.anchorMax = new Vector2(1f - MenuFraction, 1f);
         stageRect.offsetMin = new Vector2(StageGutter, StageMargin);
-        stageRect.offsetMax = new Vector2(-(MenuWidth + StageGutter * 2f), -StageMargin);
+        stageRect.offsetMax = new Vector2(-StageGutter, -StageMargin);
 
-        // The menu column: a fixed-width strip down the right edge that the panels dock into.
-        // sizeDelta.y is a DELTA against a stretched anchor span, so -80 is "canvas height less a
-        // 40 margin at each end" — the same trick StretchPanelHeight uses, moved up one level so
-        // the margin is stated once instead of by every panel that docks here.
+        // The menu column: the right MenuFraction of the canvas, which the panels dock into.
+        // offsetMin/offsetMax are insets from the anchor span, so the gutter and the top/bottom
+        // margin are stated once here instead of by every panel that docks in — which is what
+        // retires the per-panel StretchPanelHeight call for the settings panel below.
         GameObject menuColumn = CreateUIObject("MenuColumn", canvasGo.transform);
         RectTransform menuRect = (RectTransform)menuColumn.transform;
-        menuRect.anchorMin = new Vector2(1f, 0f);
+        menuRect.anchorMin = new Vector2(1f - MenuFraction, 0f);
         menuRect.anchorMax = new Vector2(1f, 1f);
-        menuRect.pivot = new Vector2(1f, 0.5f);
-        menuRect.anchoredPosition = new Vector2(-StageGutter, 0f);
-        menuRect.sizeDelta = new Vector2(MenuWidth, -StageMargin * 2f);
+        menuRect.pivot = new Vector2(0.5f, 0.5f);
+        menuRect.offsetMin = new Vector2(0f, StageMargin);
+        menuRect.offsetMax = new Vector2(-StageGutter, -StageMargin);
 
         // A glow and a chassis mark, standing in for the robot until the stage can render one.
         //
@@ -549,7 +577,10 @@ public class BuildHomeScene
         RectTransform glowRect = (RectTransform)stageGlow.transform;
         glowRect.anchorMin = glowRect.anchorMax = new Vector2(0.5f, 0.5f);
         glowRect.pivot = new Vector2(0.5f, 0.5f);
-        glowRect.anchoredPosition = new Vector2(0f, StageContentDrop);
+        // Dead centre, which is also where MainPanel's centre lands: the column is inset by the
+        // same margin top and bottom, so both rects are centred on the canvas and the mark lines up
+        // with the Drive/Settings card beside it rather than sitting 70 units below it.
+        glowRect.anchoredPosition = Vector2.zero;
         // 720, not larger: the iPad's stage is only 691 units wide (the phone's is 1146), and a glow
         // wider than the stage spills off the screen on one side and under the menu panel on the
         // other. At this size it still reads as a broad wash behind the 420 mark on both.
@@ -563,7 +594,7 @@ public class BuildHomeScene
         RectTransform markRect = (RectTransform)chassisMark.transform;
         markRect.anchorMin = markRect.anchorMax = new Vector2(0.5f, 0.5f);
         markRect.pivot = new Vector2(0.5f, 0.5f);
-        markRect.anchoredPosition = new Vector2(0f, StageContentDrop);
+        markRect.anchoredPosition = Vector2.zero; // see StageGlow: level with MainPanel
         markRect.sizeDelta = new Vector2(420f, 420f);
         Image markImage = chassisMark.AddComponent<Image>();
         markImage.sprite = HomeThemeSprites.Chassis;
@@ -580,10 +611,10 @@ public class BuildHomeScene
         // was called "Override Simulation" until the App Store rename; ProjectSettings.productName
         // and this string are now the same word, and the bundle id (…overridesim) deliberately is
         // not — it was already registered and a bundle id cannot be changed after the first upload.
-        // The title belongs to the STAGE, not the canvas. Centred on the canvas it would have hung
-        // half over the settings panel the moment the menu docked right — the panel is 900 wide and
-        // the title box is 1400 — with the overhanging half sitting on the stage looking accidental.
-        TextMeshProUGUI title = CreateText("Title", stageRegion.transform, "RoboSimL", 88f);
+        // The title is a sibling of the stage, not a child of it, because it does not stay in one
+        // place: centred on the whole screen while the home menu is up, and sliding left to sit
+        // over the stage as the settings panel docks in. See TitleDock at the end of this block.
+        TextMeshProUGUI title = CreateText("Title", homeStage.transform, "RoboSimL", 88f);
         title.fontStyle = FontStyles.Bold;
         title.textWrappingMode = TextWrappingModes.NoWrap;
         title.enableAutoSizing = true;
@@ -600,15 +631,30 @@ public class BuildHomeScene
         title.colorGradient = new VertexGradient(TextColor, TextColor,
             PrimaryBottomColor, PrimaryBottomColor);
 
-        // Stretched across the stage rather than given a width of its own, so the autosize range
-        // above has the stage's actual width to work against — 1146 on a 6.5" phone, 691 on a 13"
-        // iPad. A fixed 1400 would have overflowed the iPad's stage by twice over.
+        // Stretched across an anchor SPAN rather than given a width of its own, so the autosize
+        // range above always has the real width to work against and TitleDock can move the title by
+        // moving the span. A fixed 1400 would have overflowed the iPad's 867-wide stage outright.
+        //
+        // pivot 0.5 + anchoredPosition.x 0 + a negative sizeDelta.x is what makes the inset EQUAL at
+        // both ends of whatever span it currently occupies: the rect centres in the span and loses
+        // half the negative width at each side. So one number gives the title the same 24-unit
+        // gutter centred on the screen and centred on the stage.
         RectTransform titleRect = title.rectTransform;
         titleRect.anchorMin = new Vector2(0f, 1f);
         titleRect.anchorMax = new Vector2(1f, 1f);
         titleRect.pivot = new Vector2(0.5f, 1f);
-        titleRect.anchoredPosition = Vector2.zero;
-        titleRect.sizeDelta = new Vector2(0f, 140f);
+        titleRect.anchoredPosition = new Vector2(0f, -StageMargin);
+        titleRect.sizeDelta = new Vector2(-StageGutter * 2f, 140f);
+        // The title band crosses the settings panel's tab row. MenuColumn is a later sibling so it
+        // already wins the raycast, but a label is not something anyone should be able to press.
+        title.raycastTarget = false;
+
+        // Home: centred on the screen, because with the menu closed there is nothing on the right
+        // for it to be centred against and a title pinned to one half reads as misaligned.
+        // Settings: docked over the stage, where it would otherwise hang half across the panel.
+        TitleDock titleDock = title.gameObject.AddComponent<TitleDock>();
+        titleDock.homeAnchorMaxX = 1f;
+        titleDock.dockedAnchorMaxX = 1f - MenuFraction;
 
         // Main panel: Drive / Settings.
         // Docked into the column, and deliberately NOT stretched to fill it: a 900-wide card with
@@ -631,7 +677,8 @@ public class BuildHomeScene
         // This one DOES fill the column — it becomes the column. That also retires its
         // StretchPanelHeight call: the column already carries the top and bottom margin, and a
         // panel that took its own as well would inset twice.
-        GameObject settingsPanel = CreatePanel("SettingsPanel", menuColumn.transform, new Vector2(MenuWidth, 980f));
+        // The size passed here is immediately replaced by FillParent — the panel IS the column.
+        GameObject settingsPanel = CreatePanel("SettingsPanel", menuColumn.transform, new Vector2(900f, 980f));
         FillParent(settingsPanel);
 
         const float TabRowHeight = 72f;
@@ -847,7 +894,7 @@ public class BuildHomeScene
         // the player never needs to follow: the robot comes back as a CODE, and the codes are listed
         // right above. A new phone re-enters those. The id itself is still minted and still used to
         // check the inbox, it just isn't a thing the player is asked to look after.
-        CreateSectionHeader(accountPage.transform, "SectionSubmit", "Your own robot");
+        CreateSectionHeader(accountPage.transform, "SectionSubmit", "Submit your own robot");
 
         // Entry point to the upload-your-own-robot screen.
         Button submitRobotButton = CreateButton("SubmitRobotButton", accountPage.transform,
@@ -889,9 +936,10 @@ public class BuildHomeScene
         so.FindProperty("catalog").objectReferenceValue = freshCatalog != null ? freshCatalog : catalog;
         so.FindProperty("mainPanel").objectReferenceValue = mainPanel;
         so.FindProperty("settingsPanel").objectReferenceValue = settingsPanel;
-        // The left half. Both menu panels dock beside it, so only the three full-bleed screens
-        // turn it off — see HomeScreenController.ShowStage.
-        so.FindProperty("homeStage").objectReferenceValue = stageRegion;
+        // The stage AND the title. Both menu panels dock beside them, so only the three full-bleed
+        // screens turn this off — see HomeScreenController.ShowStage.
+        so.FindProperty("homeStage").objectReferenceValue = homeStage;
+        so.FindProperty("titleDock").objectReferenceValue = titleDock;
         so.FindProperty("loadingOverlay").objectReferenceValue = loadingOverlay;
         so.FindProperty("publicModelListParent").objectReferenceValue = publicList;
         so.FindProperty("privateModelListParent").objectReferenceValue = privateList;
@@ -1156,8 +1204,9 @@ public class BuildHomeScene
     {
         var parts = new ControllerConfigParts();
 
+        // The size passed here is replaced by FillParent; the panel takes the canvas less a margin.
         GameObject panel = CreatePanel("ControllerConfigPanel", canvas, new Vector2(1700f, 980f));
-        StretchPanelHeight(panel, 1700f); // 980 clipped off the bottom of a 20:9 canvas (~966 tall)
+        FillParent(panel, StageMargin);
         parts.panel = panel;
 
         parts.header = CreateText("ConfigHeader", panel.transform, "Controller", 48f);
@@ -1178,12 +1227,29 @@ public class BuildHomeScene
         emptyRect.sizeDelta = new Vector2(1500f, 76f);
         parts.emptyState = emptyState.gameObject;
 
-        GameObject diagram = CreateUIObject("ControllerDiagram", panel.transform);
+        // The room the diagram may use: from under the empty-state label down to a clear gap above
+        // the button row. Stretched, so it shrinks with the panel — a 6.5" phone's panel is ~899
+        // units tall against ~1167 on a 13" iPad, and at the phone's height a fixed 700-tall diagram
+        // left the Back row 12 units off the dark backdrop, reading as no padding at all.
+        GameObject diagramArea = CreateUIObject("ConfigDiagramArea", panel.transform);
+        RectTransform diagramAreaRect = (RectTransform)diagramArea.transform;
+        diagramAreaRect.anchorMin = Vector2.zero;
+        diagramAreaRect.anchorMax = Vector2.one;
+        // The panel now fits the canvas, so this inset is just the gap between the dark content
+        // area and the panel's own edge — the same StageGutter used between stage and menu.
+        diagramAreaRect.offsetMin = new Vector2(StageGutter, BottomRowInset + BottomRowHeight + 24f);
+        diagramAreaRect.offsetMax = new Vector2(-StageGutter, -176f); // clear of the header and empty state
+
+        GameObject diagram = CreateUIObject("ControllerDiagram", diagramArea.transform);
         RectTransform diagramRect = (RectTransform)diagram.transform;
         diagramRect.anchorMin = diagramRect.anchorMax = new Vector2(0.5f, 0.5f);
         diagramRect.pivot = new Vector2(0.5f, 0.5f);
-        diagramRect.anchoredPosition = new Vector2(0f, -30f);
+        diagramRect.anchoredPosition = Vector2.zero;
         diagramRect.sizeDelta = new Vector2(1560f, 700f);
+        // Scaled rather than resized: the twelve pills sit at absolute offsets from the diagram's
+        // centre, so resizing would slide the backdrop out from under them.
+        ScaleToFitParent diagramFit = diagramArea.AddComponent<ScaleToFitParent>();
+        diagramFit.target = diagramRect;
         Image diagramImage = diagram.AddComponent<Image>();
         diagramImage.sprite = HomeThemeSprites.Panel;
         diagramImage.type = Image.Type.Sliced;
@@ -1242,8 +1308,8 @@ public class BuildHomeScene
         rowRect.anchorMin = new Vector2(0f, 0f);
         rowRect.anchorMax = new Vector2(1f, 0f);
         rowRect.pivot = new Vector2(0.5f, 0f);
-        rowRect.offsetMin = new Vector2(12f, 18f);
-        rowRect.offsetMax = new Vector2(-12f, 82f); // 18 + 64 tall
+        rowRect.offsetMin = new Vector2(12f, BottomRowInset);
+        rowRect.offsetMax = new Vector2(-12f, BottomRowInset + BottomRowHeight);
         HorizontalLayoutGroup rowLayout = bottomRow.AddComponent<HorizontalLayoutGroup>();
         rowLayout.spacing = 40f;
         rowLayout.childAlignment = TextAnchor.MiddleCenter;
@@ -1495,8 +1561,12 @@ public class BuildHomeScene
         SetLayoutHeight(parts.send.gameObject, 84f);
         parts.send.interactable = false; // nothing to send until a file is chosen
 
+        // No SetLayoutHeight, deliberately. This label is EMPTY until a send is attempted, and a
+        // fixed 90 reserved a blank the height of a button between Send and Back for the whole life
+        // of the screen — which is why Back read as being stranded far below the thing it follows.
+        // With no LayoutElement the vertical layout group asks TMP for its preferred height, which
+        // is nothing while there is no text and grows to fit the message when there is one.
         parts.status = CreateText("SubmitStatus", content.transform, string.Empty, 28f);
-        SetLayoutHeight(parts.status.gameObject, 90f);
 
         parts.backButton = CreateButton("SubmitBackButton", content.transform, "Back", 36f, AccentColor);
         SetLayoutHeight(parts.backButton.gameObject, 76f);
@@ -1542,8 +1612,9 @@ public class BuildHomeScene
     {
         var parts = new ControlsLayoutParts();
 
+        // The size passed here is replaced by FillParent; see ControllerConfigPanel.
         GameObject panel = CreatePanel("ControlsLayoutPanel", canvas, new Vector2(1700f, 980f));
-        StretchPanelHeight(panel, 1700f); // as ControllerConfigPanel: 980 clips on a ~966-tall canvas
+        FillParent(panel, StageMargin);
         parts.panel = panel;
 
         TextMeshProUGUI header = CreateText("LayoutHeader", panel.transform, "Edit Control Layout", 48f);
@@ -1562,14 +1633,30 @@ public class BuildHomeScene
         hintRect.anchoredPosition = new Vector2(0f, -82f);
         hintRect.sizeDelta = new Vector2(1500f, 40f);
 
-        // The preview: local space = 1920x1080 reference, scaled to fit under the header.
-        GameObject preview = CreateUIObject("LayoutPreview", panel.transform);
+        // The room the preview may use: under the hint, clear of the buttons. See ConfigDiagramArea
+        // — the authored 0.7 scale this replaces was measured against a 1080-tall canvas, and on a
+        // ~899-tall one it put the preview 30 units ON TOP of the Back button.
+        GameObject previewArea = CreateUIObject("LayoutPreviewArea", panel.transform);
+        RectTransform previewAreaRect = (RectTransform)previewArea.transform;
+        previewAreaRect.anchorMin = Vector2.zero;
+        previewAreaRect.anchorMax = Vector2.one;
+        // The panel now fits the canvas, so this inset is just the gap between the dark content
+        // area and the panel's own edge — the same StageGutter used between stage and menu.
+        previewAreaRect.offsetMin = new Vector2(StageGutter, BottomRowInset + BottomRowHeight + 24f);
+        previewAreaRect.offsetMax = new Vector2(-StageGutter, -138f); // clear of the header and hint
+
+        // The preview: local space = 1920x1080 reference, scaled to fit the area above.
+        GameObject preview = CreateUIObject("LayoutPreview", previewArea.transform);
         RectTransform previewRect = (RectTransform)preview.transform;
         previewRect.anchorMin = previewRect.anchorMax = new Vector2(0.5f, 0.5f);
         previewRect.pivot = new Vector2(0.5f, 0.5f);
-        previewRect.anchoredPosition = new Vector2(0f, -20f);
+        previewRect.anchoredPosition = Vector2.zero;
         previewRect.sizeDelta = new Vector2(1920f, 1080f);
-        previewRect.localScale = new Vector3(0.7f, 0.7f, 1f); // 1344x756 on screen
+        // Scale, never size: a proxy's anchoredPosition IS the control's position in 1920x1080
+        // reference pixels, and DraggableControlProxy clamps against dragArea.rect — the UNSCALED
+        // rect — so the reference space has to stay exactly 1920x1080 whatever it is drawn at.
+        ScaleToFitParent previewFit = previewArea.AddComponent<ScaleToFitParent>();
+        previewFit.target = previewRect;
         Image previewImage = preview.AddComponent<Image>();
         previewImage.sprite = HomeThemeSprites.Panel;
         previewImage.type = Image.Type.Sliced;
@@ -1584,15 +1671,15 @@ public class BuildHomeScene
         RectTransform resetRect = (RectTransform)parts.resetButton.transform;
         resetRect.anchorMin = resetRect.anchorMax = new Vector2(0.5f, 0f);
         resetRect.pivot = new Vector2(1f, 0f);
-        resetRect.anchoredPosition = new Vector2(-12f, 18f);
-        resetRect.sizeDelta = new Vector2(240f, 64f);
+        resetRect.anchoredPosition = new Vector2(-12f, BottomRowInset);
+        resetRect.sizeDelta = new Vector2(240f, BottomRowHeight);
 
         parts.backButton = CreateButton("LayoutBackButton", panel.transform, "Back", 34f, AccentColor);
         RectTransform backRect = (RectTransform)parts.backButton.transform;
         backRect.anchorMin = backRect.anchorMax = new Vector2(0.5f, 0f);
         backRect.pivot = new Vector2(0f, 0f);
-        backRect.anchoredPosition = new Vector2(12f, 18f);
-        backRect.sizeDelta = new Vector2(240f, 64f);
+        backRect.anchoredPosition = new Vector2(12f, BottomRowInset);
+        backRect.sizeDelta = new Vector2(240f, BottomRowHeight);
 
         panel.SetActive(false); // ControlsLayoutScreen.Open shows it
         return parts;
@@ -1909,17 +1996,23 @@ public class BuildHomeScene
     // 980-tall settings and controller panels ran off the bottom edge. Stretching vertically instead
     // makes the height follow the canvas — sizeDelta.y is a DELTA against a stretched anchor span,
     // so -80 means "canvas height minus a 40 margin at each end".
-    // A panel that IS its container, stretched to all four of its edges. Used where the margin is
-    // already owned by what the panel sits in — MenuColumn carries it for the whole column — so a
-    // panel taking its own as well would inset twice and leave a visible double gap.
-    private static void FillParent(GameObject panel)
+    // A panel that IS its container, stretched to all four of its edges and inset by a margin.
+    //
+    // margin 0 is for a panel whose margin is already owned by what it sits in — MenuColumn carries
+    // it for the whole column, and a panel taking its own as well would inset twice.
+    //
+    // Use this rather than StretchPanelHeight for anything meant to be near-fullscreen. A width in
+    // units cannot be right on two devices: the sub-screens were authored at 1700, which is 80% of
+    // a 6.5" phone's 2118-unit canvas but 37 units WIDER than a 13" iPad's 1663, so on the iPad
+    // their rounded left and right edges fell off the screen entirely.
+    private static void FillParent(GameObject panel, float margin = 0f)
     {
         RectTransform rect = (RectTransform)panel.transform;
         rect.anchorMin = Vector2.zero;
         rect.anchorMax = Vector2.one;
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.anchoredPosition = Vector2.zero;
-        rect.sizeDelta = Vector2.zero;
+        rect.sizeDelta = new Vector2(-margin * 2f, -margin * 2f);
     }
 
     private static void StretchPanelHeight(GameObject panel, float width, float verticalMargin = 40f)

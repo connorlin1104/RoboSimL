@@ -43,6 +43,12 @@ public static class HomeThemeSprites
     // 9-sliced tile, so its edges are the only ones seen at their authored resolution.
     private const int ChassisSize = 512;
 
+    // The d-pad's arrow. Generated rather than taken from Unity's builtin UI/Skin/DropdownArrow,
+    // which is a DARK glyph drawn for the light default skin: an Image tint MULTIPLIES into the
+    // sprite, so tinting it white leaves it black, which is what the field's four arrow buttons
+    // shipped as while the L1/L2/R1/R2 and X/B/A/Y buttons beside them were white text.
+    private const int ArrowSize = 128;
+
     // The border is what Image.Type.Sliced protects from stretching. It has to be at least the
     // radius, or the corner arc gets stretched along with the middle and comes out as an ellipse;
     // a couple of pixels past it leaves room for the anti-aliased edge.
@@ -86,6 +92,7 @@ public static class HomeThemeSprites
         written += EnsureShadow(RoboSimPaths.UiShadowSprite, ShadowSize, force);
         written += EnsureRing(RoboSimPaths.UiSpinnerSprite, SpinnerSize, SpinnerThickness, force);
         written += EnsureChassis(RoboSimPaths.UiChassisSprite, ChassisSize, force);
+        written += EnsureArrow(RoboSimPaths.UiArrowSprite, ArrowSize, force);
         if (written > 0) AssetDatabase.SaveAssets();
         return written;
     }
@@ -264,6 +271,61 @@ public static class HomeThemeSprites
                Mathf.Min(Mathf.Max(qx, qy), 0f) - radius;
     }
 
+    // A solid triangle pointing DOWN, which is the direction the builtin arrow it replaces pointed:
+    // BuildDriveControls rolls it 180/0/-90/+90 for up/down/left/right, and matching the original
+    // orientation keeps those four numbers correct.
+    private static int EnsureArrow(string path, int size, bool force)
+    {
+        if (!force && File.Exists(path)) return 0;
+
+        // Authored against 128 and scaled, so changing ArrowSize keeps the proportions.
+        float unit = size / 128f;
+        // Centred on the texture in both axes — 26..102 vertically and 20..108 across, both
+        // centred on 64. The four arrows are the SAME sprite rolled 90 degrees apart around the
+        // knob's middle, so a glyph even a pixel off centre shows up as the pair pointing one way
+        // sitting lower than the pair pointing the other.
+        var apex = new Vector2(64f * unit, 26f * unit);      // the point, at the bottom
+        var left = new Vector2(20f * unit, 102f * unit);
+        var right = new Vector2(108f * unit, 102f * unit);
+
+        var pixels = new Color32[size * size];
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float distance = Triangle(new Vector2(x + 0.5f, y + 0.5f), apex, left, right);
+                pixels[y * size + x] = White(Mathf.Clamp01(0.5f - distance));
+            }
+        }
+        WritePng(path, pixels, size, size);
+        ImportSprite(path, 0); // one shape at one size: nothing to 9-slice
+        return 1;
+    }
+
+    // Distance to a triangle, as the furthest of its three edge half-planes.
+    //
+    // Exact inside the shape and along every edge, which is all the anti-aliasing reads. It
+    // under-estimates diagonally outside a corner, where the true distance is to the vertex rather
+    // than to either edge — that only softens the two top corners by a fraction of a pixel, and the
+    // exact form costs three more square roots per pixel to fix something nobody can see.
+    private static float Triangle(Vector2 p, Vector2 a, Vector2 b, Vector2 c)
+    {
+        Vector2 centre = (a + b + c) / 3f;
+        return Mathf.Max(HalfPlane(p, a, b, centre),
+               Mathf.Max(HalfPlane(p, b, c, centre), HalfPlane(p, c, a, centre)));
+    }
+
+    // Signed distance from p to the line through a and b, positive on the side AWAY from `inside`.
+    // Deriving the sign from the centroid rather than from vertex order is what lets the caller
+    // list the corners in whichever order reads clearly.
+    private static float HalfPlane(Vector2 p, Vector2 a, Vector2 b, Vector2 inside)
+    {
+        Vector2 edge = b - a;
+        var normal = new Vector2(edge.y, -edge.x).normalized;
+        if (Vector2.Dot(normal, inside - a) > 0f) normal = -normal;
+        return Vector2.Dot(normal, p - a);
+    }
+
     private static float Circle(float dx, float dy, float radius) =>
         Mathf.Sqrt(dx * dx + dy * dy) - radius;
 
@@ -320,6 +382,7 @@ public static class HomeThemeSprites
     public static Sprite Shadow => Load(RoboSimPaths.UiShadowSprite);
     public static Sprite Spinner => Load(RoboSimPaths.UiSpinnerSprite);
     public static Sprite Chassis => Load(RoboSimPaths.UiChassisSprite);
+    public static Sprite Arrow => Load(RoboSimPaths.UiArrowSprite);
 
     // Generates on demand rather than requiring EnsureAll to have been called first. Build Drive
     // Controls builds the field-scene buttons from these too and can be run on its own — on a fresh

@@ -27,6 +27,8 @@ public class HomeScreenController : MonoBehaviour
              "the settings panel dock beside it and leave it showing; the three full-bleed screens " +
              "below cover the whole canvas, so they hide it. Optional: an older HomeScene has none.")]
     [SerializeField] private GameObject homeStage;
+    [Tooltip("The title's slide between centred-on-screen and centred-over-the-stage. Optional: an older HomeScene has none.")]
+    [SerializeField] private TitleDock titleDock;
     [Tooltip("Full-screen loading overlay shown when Drive is pressed. Its click-blocking backdrop stops spam-taps while the field scene loads.")]
     [SerializeField] private GameObject loadingOverlay;
 
@@ -142,6 +144,9 @@ public class HomeScreenController : MonoBehaviour
     {
         if (mainPanel != null) mainPanel.SetActive(true);
         if (settingsPanel != null) settingsPanel.SetActive(false);
+        // Immediate, not animated: the screen opens with the menu closed, and a title that slid
+        // into place on the first frame would read as having started in the wrong spot.
+        if (titleDock != null) titleDock.SetImmediate(false);
         if (loadingOverlay != null) loadingOverlay.SetActive(false);
         // Before anything reads a map: give every robot that ships a default layout to a device
         // that hasn't got one. HomeScene is build index 0, so this is the normal path in a build.
@@ -209,12 +214,16 @@ public class HomeScreenController : MonoBehaviour
     {
         if (mainPanel != null) mainPanel.SetActive(false);
         if (settingsPanel != null) settingsPanel.SetActive(true);
+        // The panel docks into the right of the screen, so a title centred on the screen would be
+        // half behind it. It slides left onto the stage instead, and slides back on the way out.
+        if (titleDock != null) titleDock.SetDocked(true);
     }
 
     public void OnBackPressed()
     {
         if (settingsPanel != null) settingsPanel.SetActive(false);
         if (mainPanel != null) mainPanel.SetActive(true);
+        if (titleDock != null) titleDock.SetDocked(false);
     }
 
     public void OnConfigureControllerPressed()

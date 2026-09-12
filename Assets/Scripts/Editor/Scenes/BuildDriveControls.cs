@@ -103,6 +103,14 @@ public static class BuildDriveControls
 
     private static void Build()
     {
+        // The generated sprites and fonts this tool draws the controls from. Build Home Screen has
+        // always made these and this tool has always assumed it ran first, which held right up until
+        // a NEW sprite was added — the d-pad's arrow — and Build Drive Controls on its own set every
+        // arrow Image to a null sprite. A control that renders as nothing is the quiet kind of
+        // failure, and both calls are no-ops once the assets exist.
+        HomeThemeSprites.EnsureAll();
+        HomeThemeFonts.EnsureAll();
+
         // Where the user was, so they can be put back. Without this the tool left MainScene open,
         // and since Play starts in whatever scene is open, running it silently changed which field
         // you land in — which looks like the app changed its mind about the lite field.
@@ -397,8 +405,8 @@ public static class BuildDriveControls
         return go;
     }
 
-    // Arrow glyph for the d-pad, reused in place. The built-in dropdown arrow points DOWN, so Up
-    // is a 180-degree roll and Left/Right are -90/+90 (positive z rotation is counter-clockwise).
+    // Arrow glyph for the d-pad, reused in place. The glyph points DOWN, so Up is a 180-degree roll
+    // and Left/Right are -90/+90 (positive z rotation is counter-clockwise).
     private static GameObject EnsureArrowGlyph(GameObject padButton, float zRotationDegrees)
     {
         GameObject glyph = EnsureChild(padButton.transform, "Arrow");
@@ -409,8 +417,12 @@ public static class BuildDriveControls
         rect.sizeDelta = new Vector2(44f, 44f);
         rect.localRotation = Quaternion.Euler(0f, 0f, zRotationDegrees);
 
+        // The generated white arrow, not Unity's builtin UI/Skin/DropdownArrow. That one is a DARK
+        // glyph drawn for the light default skin, and an Image tint multiplies into the sprite — so
+        // the TextColor set here has been producing a BLACK arrow ever since these were built, while
+        // the shoulder and X/B/A/Y buttons beside them draw their labels as white text.
         Image image = EnsureComponent<Image>(glyph);
-        image.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/DropdownArrow.psd");
+        image.sprite = HomeThemeSprites.Arrow;
         image.color = BuildHomeScene.TextColor;
         image.raycastTarget = false; // touches belong to the pad button
         return padButton;
