@@ -16,6 +16,8 @@ MonoBehaviour:
   - id: 360rpm-drivetrain
     displayName: 360 RPM Drivetrain
     prefab: {fileID: 5735647931427841497, guid: 23d9f44831aff4b718f19fc9e660cc74, type: 3}
+    showcasePrefab: {fileID: 5837005528249224396, guid: 4d5119d0fb0e0406e9e6e8d861693468, type: 3}
+    showcaseSource: showcase-1|715398ca78bae64319d0e46ea811c912
     bundle:
       id: 
       version: 
@@ -32,6 +34,8 @@ MonoBehaviour:
   - id: 654v-v1
     displayName: 654V v1
     prefab: {fileID: 8896121903650456618, guid: 256eab26b288b43f2b83f934f7a84512, type: 3}
+    showcasePrefab: {fileID: 2891523012572256922, guid: dbe3f33dc887f459bb768bef06963206, type: 3}
+    showcaseSource: showcase-1|7bb4c53ded05b0dd43530755bc4b26ea
     bundle:
       id: 
       version: 
@@ -78,6 +82,8 @@ MonoBehaviour:
   - id: 654v-v2
     displayName: 654V v2
     prefab: {fileID: 3368822269678000047, guid: b24e7cadad95c403791ed70b472595ec, type: 3}
+    showcasePrefab: {fileID: 6955950850061005408, guid: cbc20e3ef9cf1436086eb097b5bd3384, type: 3}
+    showcaseSource: showcase-1|f0157929f244f2fb2bf3d6aa7ecbce7e
     bundle:
       id: 
       version: 
@@ -144,6 +150,8 @@ MonoBehaviour:
   - id: ryan-cascaderobot
     displayName: 654V v3
     prefab: {fileID: 332329364715366720, guid: c8a66e3d5b40f40dc9bc16248a84cb16, type: 3}
+    showcasePrefab: {fileID: 9177254867316035479, guid: 6863d36c1317143749b4db694ee76e20, type: 3}
+    showcaseSource: showcase-1|11da21fefbedbd576cd89e7e05dd18e5
     bundle:
       id: 
       version: 

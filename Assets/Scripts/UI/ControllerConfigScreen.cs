@@ -362,9 +362,11 @@ public class ControllerConfigScreen : MonoBehaviour
     }
 
     // A mechanism whose display name never got set would otherwise render as a bare " — Forward
-    // (hold)" row with nothing to identify it. The id is ugly but it is never empty.
+    // (hold)" row with nothing to identify it. The id is ugly but it is never empty. Either way it goes
+    // through MechanismNames — the same cleanup as the home stage's mechanism line, so "CascadeLift"
+    // reads "Cascade Lift" in both places.
     private static string NameOf(RobotModelCatalog.MechanismInfo mechanism)
-        => string.IsNullOrWhiteSpace(mechanism.displayName) ? mechanism.id : mechanism.displayName;
+        => MechanismNames.Pretty(string.IsNullOrWhiteSpace(mechanism.displayName) ? mechanism.id : mechanism.displayName);
 
     private RobotModelCatalog.MechanismInfo FindMechanism(string id)
     {

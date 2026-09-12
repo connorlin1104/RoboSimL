@@ -46,6 +46,11 @@ internal static class RoboSimPaths
     public const string UiChassisSprite = UiSpritesFolder + "/ChassisMark.png";
     public const string UiArrowSprite = UiSpritesFolder + "/ArrowGlyph.png";
 
+    // The home stage's baked robots — see BuildShowcasePrefabs. Beside the other generated UI assets,
+    // and deliberately NOT under RobotsFolder: RobotPrefabPaths scans that recursively for 42 callers,
+    // and Delete Robot, which doesn't filter on anything, would list these as orphans to delete.
+    public const string ShowcaseFolder = "Assets/UI/Showcase";
+
     // The UI's typeface. The TTFs and their OFL licence are committed; the TMP font assets beside
     // them are baked from those by HomeThemeFonts. Both are committed rather than generated on a
     // fresh clone, because the scene references a font asset by GUID and a regenerated one would

@@ -374,6 +374,11 @@ public class HomeScreenController : MonoBehaviour
         if (privateEmptyLabel != null) privateEmptyLabel.SetActive(privateCount == 0);
         ResizeModelColumns();
         RefreshHighlight();
+
+        // Every rebuild comes through here — launch, a code entered or forgotten, the inbox, a network
+        // sync — and each can change what the catalog's selection FALLS BACK to without anyone setting
+        // it. The catalog announces only a real change, so asking is free. The home stage listens.
+        catalog.NotifySelectionMayHaveChanged();
     }
 
     // How many rows tall each column stands, whatever it happens to hold: a fixed window, not a box

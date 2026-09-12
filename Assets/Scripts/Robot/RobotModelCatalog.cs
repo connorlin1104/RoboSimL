@@ -92,6 +92,23 @@ public class RobotModelCatalog : ScriptableObject
         // every robot a player sends in — see `bundle` below, which is the other way to fill this in.
         public GameObject prefab;
 
+        // The home screen's copy of this robot: the same meshes and materials with every script,
+        // collider and joint stripped off, the fasteners culled and the hierarchy flattened — baked by
+        // Tools > RoboSim > Robot > Advanced > Build Showcase Prefabs, which Build Home Screen also runs.
+        // RobotShowcase says why the stage can't simply show `prefab`.
+        //
+        // A direct reference, so it is compiled into the app just as `prefab` is — the trade BundleRef
+        // below exists to avoid. It is the right one here: it is only ever set for a robot whose `prefab`
+        // is already compiled in, and it points at geometry that robot already carries. A robot delivered
+        // as a bundle leaves it null, and the stage shows its name over the app's chassis mark instead.
+        [Tooltip("The stripped copy the home screen's stage turns. Written by Build Showcase Prefabs — " +
+                 "don't assign it by hand.")]
+        public GameObject showcasePrefab;
+
+        // Which version of `prefab` (and of the bake itself) the showcase was made from. Build Home Screen
+        // re-bakes whenever this stops matching, so editing a robot can't leave the menu showing the old one.
+        [HideInInspector] public string showcaseSource;
+
         [Tooltip("Where to fetch this robot from when it isn't compiled into the app. Leave empty " +
                  "for a built-in robot; the direct prefab reference above wins if both are set.")]
         public BundleRef bundle = new BundleRef();
@@ -225,7 +242,34 @@ public class RobotModelCatalog : ScriptableObject
         {
             PlayerPrefs.SetString(SelectedModelPrefKey, value);
             PlayerPrefs.Save(); // flush immediately so a crash/force-quit doesn't lose the choice
+            NotifySelectionMayHaveChanged();
         }
+    }
+
+    // Raised when the robot the player would drive CHANGES — not merely when the selection is written.
+    //
+    // The selection can move without the setter above ever running. The getter FALLS BACK to the first
+    // visible robot whenever the saved id names nothing this device can see, so forgetting a code
+    // quietly moves the selection off a private robot, and a sync that adds a robot can change which one
+    // is first. A listener on the setter alone would miss both, and the home stage would go on showing a
+    // robot that is no longer the one Drive loads.
+    //
+    // So whatever changes VisibleModels calls NotifySelectionMayHaveChanged, which re-reads the EFFECTIVE
+    // selection and raises this only when it differs from what was last announced. The de-duplication is
+    // what makes calling it too often free: the rule is "call it wherever the visible list changes", not
+    // a list of call sites someone has to keep complete.
+    //
+    // A listener should also read the selection when it subscribes. This can fire while it is disabled,
+    // and — because the catalog is an asset — what was last announced outlives a Play session in the editor.
+    public event Action<Entry> SelectionChanged;
+    [NonSerialized] private string announcedSelectionId;
+
+    public void NotifySelectionMayHaveChanged()
+    {
+        string selected = SelectedModelId;
+        if (selected == announcedSelectionId) return;
+        announcedSelectionId = selected;
+        SelectionChanged?.Invoke(SelectedModel);
     }
 
     // The Entry for the current selection (mirrors SelectedModelId's fallback), or null if there is

@@ -52,7 +52,7 @@ public class BuildHomeScene
     // A version stamp turns "did I remember to add a check for this?" — a judgement call that has
     // to be made correctly every time — into a one-line bump. It is also the ONLY thing that can
     // catch a change with no object footprint at all, which an added component is.
-    internal const string HomeSceneStamp = "HomeSceneStamp_v6";
+    internal const string HomeSceneStamp = "HomeSceneStamp_v7";
 
     // The theme, derived from the app icon (Assets/Icons/AppIcon.png) rather than invented.
     //
@@ -130,6 +130,21 @@ public class BuildHomeScene
     private const float StageGutter = 24f;   // between stage and menu, and at the screen edges
     private const float StageMargin = 40f;   // top and bottom
 
+    // The robot's window keeps clear of the title above it and the caption below it by the SAME amount,
+    // so the robot sits at the stage's centre — level with the glow, the chassis mark and the
+    // Drive/Settings card beside it, which is the alignment Stage 2 set up. The title band is the
+    // title's own height (see the Title block).
+    private const float StageTitleBand = 140f;
+    private const float StageCaptionBand = 140f;
+
+    // A long lens. A wide one exaggerates perspective, and on a CAD model of square tube and flat plate
+    // that reads as a boxy fish-eye; 26 degrees flattens it toward the product-shot look.
+    private const float StageFieldOfView = 26f;
+
+    // The stage's lights (see BuildRobotStage): a warm key, a cool fill, and the icon's cyan on the rim.
+    private static readonly Color KeyLightColor = new Color32(0xFF, 0xF4, 0xE6, 0xFF);
+    private static readonly Color FillLightColor = new Color32(0xA9, 0xC8, 0xFF, 0xFF);
+
     // Muted text — section headers, column titles, hints. Was written out as
     // "new Color(TextColor.r, TextColor.g, TextColor.b, 0.62f)" at six separate call sites.
     internal static readonly Color TextMutedColor =
@@ -170,11 +185,20 @@ public class BuildHomeScene
         HomeThemeSprites.EnsureAll();
         HomeThemeFonts.EnsureAll();
 
+        // 1c) The layer the stage robot is drawn on. Before anything that uses it — the showcase bake
+        //     and the stage camera's culling mask — so the name exists in the project's layer list.
+        BuildShowcasePrefabs.EnsureStageLayer();
+
         // 2) The model catalog the home screen lists, and the (initially blank) submissions
         //    destination the Submit a Robot screen posts to.
         bool catalogCreated;
         RobotModelCatalog catalog = EnsureCatalog(out catalogCreated);
         EnsureUploadConfig(out bool uploadConfigCreated);
+
+        // 2b) The stripped robots the home stage turns. After the catalog, whose entries they are written
+        //     into; before the scene, which reads them. Re-bakes only a robot that has changed since its
+        //     last bake, so this costs nothing on a re-run.
+        string showcaseStatus = BuildShowcasePrefabs.EnsureAll(catalog);
 
         string previousScenePath = SceneManager.GetActiveScene().path;
         if (interactive && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
@@ -235,7 +259,7 @@ public class BuildHomeScene
         Debug.Log($"Build Home Scene: TMP essentials {(tmpImported ? "imported" : "already present")}, " +
                   $"catalog {(catalogCreated ? "created at " + RoboSimPaths.RobotModelCatalog : "found")}, " +
                   $"upload config {(uploadConfigCreated ? "created at " + RoboSimPaths.RobotUploadConfig + " (fill in the Firebase bucket + key to switch submissions on)" : "found")}, " +
-                  $"HomeScene {rebuildStatus}, build settings = [HomeScene, SampleScene], " +
+                  $"showcases {showcaseStatus}, HomeScene {rebuildStatus}, build settings = [HomeScene, SampleScene], " +
                   $"field Home button {homeButtonStatus}, controls appearance {appearanceStatus}.");
     }
 
@@ -253,7 +277,7 @@ public class BuildHomeScene
     // REMOVED needs an inverted check that the committed scene no longer contains it. Otherwise
     // every remaining check still passes against the old scene, the rebuild is skipped, and the
     // button someone asked to delete keeps shipping — now wired to a handler that no longer exists.
-    private static bool HomeSceneIsValid()
+    internal static bool HomeSceneIsValid()
     {
         if (!File.Exists(RoboSimPaths.HomeScene)) return false;
         Scene scene = EditorSceneManager.OpenScene(RoboSimPaths.HomeScene, OpenSceneMode.Single);
@@ -286,6 +310,14 @@ public class BuildHomeScene
         // authored scale measured against one canvas height. No serialized ref, so check the object.
         if (FindDescendantRect(scene, "ConfigDiagramArea") == null) return false;
         if (FindDescendantRect(scene, "LayoutPreviewArea") == null) return false;
+        // Stage 3's robot. The window and its caption are UI, so the Rect search sees them; the rig is a
+        // camera, three lights and two holders — plain Transforms, which FindDescendantRect is blind to.
+        if (FindDescendantRect(scene, "StageRobotView") == null) return false;
+        if (FindDescendantRect(scene, "StageCaption") == null) return false;
+        if (FindDescendantTransform(scene, "RobotStage") == null) return false;
+        if (FindDescendantTransform(scene, "StagePivot") == null) return false;
+        if (FindDescendantTransform(scene, "StageCamera") == null) return false;
+        if (FindDescendantTransform(scene, "StageRobotHolder") == null) return false;
 
         // Structural checks for things that have no serialized reference of their own. The tab row
         // and the scrollbar are pure hierarchy, so without these a pre-tabs HomeScene would report
@@ -331,6 +363,19 @@ public class BuildHomeScene
         // The drive-feel hint paragraph under the sensitivity sliders is gone (2026-09-01):
         // the sliders' own percent labels say what they do.
         if (FindDescendantRect(scene, "DriveFeelHint") != null) return false;
+
+        // The stage view holds its own refs — to the catalog it listens to, the rig it drives and the
+        // labels it fills — so a scene built with the view but without them still has to rebuild.
+        RobotStageView stageView = null;
+        foreach (GameObject rootGo in scene.GetRootGameObjects())
+        {
+            if (stageView == null) stageView = rootGo.GetComponentInChildren<RobotStageView>(true);
+        }
+        if (stageView == null) return false;
+        SerializedObject viewSo = new SerializedObject(stageView);
+        if (!IsRefSet(viewSo, "catalog") || !IsRefSet(viewSo, "stage") || !IsRefSet(viewSo, "stageCamera") ||
+            !IsRefSet(viewSo, "fallbackMark") || !IsRefSet(viewSo, "nameLabel") || !IsRefSet(viewSo, "mechanismsLabel"))
+            return false;
 
         SerializedObject so = new SerializedObject(controller);
         SerializedObject configSo = new SerializedObject(configScreen);
@@ -415,6 +460,26 @@ public class BuildHomeScene
             EditorUtility.DisplayDialog("Build Home Scene", msg, "OK");
             return false;
         }
+
+        // The stage view listens to the same catalog for the selected robot. Same failure, same check:
+        // without it the stage would sit on the chassis mark forever.
+        RobotStageView savedView = null;
+        foreach (GameObject rootGo in reloaded.GetRootGameObjects())
+        {
+            savedView = rootGo.GetComponentInChildren<RobotStageView>(true);
+            if (savedView != null) break;
+        }
+        SerializedProperty savedViewCatalog = savedView != null
+            ? new SerializedObject(savedView).FindProperty("catalog") : null;
+        if (savedViewCatalog == null || savedViewCatalog.objectReferenceValue == null)
+        {
+            const string msg = "Build Home Scene: the saved HomeScene lost the robot stage's RobotModelCatalog " +
+                               "reference — the stage would never show a robot.";
+            Debug.LogError(msg);
+            if (!interactive) throw new InvalidOperationException(msg);
+            EditorUtility.DisplayDialog("Build Home Scene", msg, "OK");
+            return false;
+        }
         return true;
     }
 
@@ -491,6 +556,17 @@ public class BuildHomeScene
         camera.backgroundColor = BackgroundTopColor;
         cameraGo.AddComponent<AudioListener>();
         camera.GetUniversalAdditionalCameraData();
+
+        // The home screen's only 3D content is the stage robot, and this camera must not draw it. It
+        // draws Everything by default, so it would render every one of the robot's several hundred parts
+        // a second time, each frame, into a backbuffer the opaque backdrop then covers. No structural
+        // check can see a culling mask; the stamp and Validate Home Stage are what guard this line.
+        camera.cullingMask = ~(1 << RobotShowcase.LayerIndex);
+
+        // The stage's 3D half — lighting, then the rig — straight after this camera, because the two
+        // cameras' depths only mean anything relative to each other (see BuildRobotStage).
+        ApplyStageLighting();
+        RobotStage stageRig = BuildRobotStage(camera, out Camera stageCamera);
 
         // Canvas: mirror the field scene's setup (overlay, scale-with-screen 1920x1080).
         GameObject canvasGo = CreateUIObject("Canvas", null);
@@ -604,6 +680,54 @@ public class BuildHomeScene
         UiGradient markGradient = chassisMark.AddComponent<UiGradient>();
         markGradient.topColor = TextColor;
         markGradient.bottomColor = PrimaryBottomColor;
+
+        // The window the robot is seen through: a RawImage showing the stage camera's render texture,
+        // and the surface a finger spins it on. The chassis mark above stays as the FALLBACK — for a
+        // robot delivered as a bundle, or one with no baked showcase — and RobotStageView hides it while
+        // a robot is showing. Created after the mark so it draws over it, and before the title, which is
+        // a later sibling of this whole region and so draws over everything here.
+        GameObject stageViewGo = CreateUIObject("StageRobotView", stageRegion.transform);
+        RectTransform stageViewRect = (RectTransform)stageViewGo.transform;
+        stageViewRect.anchorMin = Vector2.zero;
+        stageViewRect.anchorMax = Vector2.one;
+        stageViewRect.offsetMin = new Vector2(0f, StageCaptionBand);
+        stageViewRect.offsetMax = new Vector2(0f, -StageTitleBand);
+        RawImage stageImage = stageViewGo.AddComponent<RawImage>();
+        stageImage.color = Color.white;
+        stageImage.raycastTarget = true; // the whole window is the drag surface, not just the robot's pixels
+        // Off until the stage has drawn into it: a RawImage with no texture draws a white rectangle.
+        stageImage.enabled = false;
+        RobotStageView stageView = stageViewGo.AddComponent<RobotStageView>();
+
+        // The caption band under the window: the robot's name, and its mechanisms beneath in muted type.
+        // A layout group, so hiding the mechanism line for a robot that has none re-centres the name.
+        GameObject stageCaption = CreateUIObject("StageCaption", stageRegion.transform);
+        RectTransform captionRect = (RectTransform)stageCaption.transform;
+        captionRect.anchorMin = Vector2.zero;
+        captionRect.anchorMax = new Vector2(1f, 0f);
+        captionRect.pivot = new Vector2(0.5f, 0f);
+        captionRect.anchoredPosition = Vector2.zero;
+        captionRect.sizeDelta = new Vector2(0f, StageCaptionBand);
+        VerticalLayoutGroup captionLayout = AddVerticalLayout(stageCaption, 0, 6f);
+        captionLayout.childAlignment = TextAnchor.MiddleCenter;
+
+        TextMeshProUGUI stageName = CreateText("StageRobotName", stageCaption.transform, string.Empty, 44f);
+        stageName.fontStyle = FontStyles.Bold;
+        stageName.textWrappingMode = TextWrappingModes.NoWrap;
+        stageName.enableAutoSizing = true;
+        stageName.fontSizeMin = 30f;
+        stageName.fontSizeMax = 44f;
+        stageName.raycastTarget = false;
+        SetLayoutHeight(stageName.gameObject, 56f);
+
+        TextMeshProUGUI stageMechanisms = CreateText("StageRobotMechanisms", stageCaption.transform, string.Empty, 24f);
+        stageMechanisms.color = TextMutedColor;
+        stageMechanisms.textWrappingMode = TextWrappingModes.NoWrap;
+        stageMechanisms.enableAutoSizing = true;
+        stageMechanisms.fontSizeMin = 18f;
+        stageMechanisms.fontSizeMax = 24f;
+        stageMechanisms.raycastTarget = false;
+        SetLayoutHeight(stageMechanisms.gameObject, 34f);
 
         // Title. "RoboSimL" is 8 glyphs and fits at full size on every canvas we target, so the
         // autosize range below no longer does any work — it is kept because it costs nothing and is
@@ -1059,6 +1183,17 @@ public class BuildHomeScene
         so.FindProperty("submitRobot").objectReferenceValue = submitScreen;
         so.ApplyModifiedPropertiesWithoutUndo();
 
+        // The robot stage's window: the catalog it listens to for the selected robot (re-loaded, for the
+        // same reason as the controller's above), the rig it drives, and what it fills in.
+        SerializedObject viewSo = new SerializedObject(stageView);
+        viewSo.FindProperty("catalog").objectReferenceValue = freshCatalog != null ? freshCatalog : catalog;
+        viewSo.FindProperty("stage").objectReferenceValue = stageRig;
+        viewSo.FindProperty("stageCamera").objectReferenceValue = stageCamera;
+        viewSo.FindProperty("fallbackMark").objectReferenceValue = chassisMark;
+        viewSo.FindProperty("nameLabel").objectReferenceValue = stageName;
+        viewSo.FindProperty("mechanismsLabel").objectReferenceValue = stageMechanisms;
+        viewSo.ApplyModifiedPropertiesWithoutUndo();
+
         UnityEventTools.AddPersistentListener(driveButton.onClick, controller.OnDrivePressed);
         UnityEventTools.AddPersistentListener(settingsButton.onClick, controller.OnSettingsPressed);
         UnityEventTools.AddPersistentListener(backButton.onClick, controller.OnBackPressed);
@@ -1078,6 +1213,127 @@ public class BuildHomeScene
         UnityEventTools.AddPersistentListener(submitParts.sharing.onClick, submitScreen.OnSharingPressed);
         UnityEventTools.AddPersistentListener(submitParts.send.onClick, submitScreen.OnSendPressed);
         UnityEventTools.AddPersistentListener(inboxParts.unlockButton.onClick, controller.OnInboxUnlockPressed);
+    }
+
+    // --- The robot stage ---
+
+    // The home scene's lighting, which until the stage existed nothing had ever set. A new scene lights
+    // itself from Unity's default procedural sky — a daylight blue that, as ambient, would light the
+    // robot's shadowed side sky-blue against the navy UI. Set here, between NewScene (which resets it)
+    // and the save.
+    //
+    // Ambient from the palette instead: the icon's navy family, lighter above, darkest below, so a
+    // robot's underside reads as part of the screen rather than a hole in it. No sky and no reflection
+    // source: both cameras clear to a solid colour, so a skybox would be drawn by neither and only cost
+    // a reflection capture at load.
+    private static void ApplyStageLighting()
+    {
+        RenderSettings.skybox = null;
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor = NeutralColor;
+        RenderSettings.ambientEquatorColor = PanelColor;
+        RenderSettings.ambientGroundColor = ListColor;
+        RenderSettings.defaultReflectionMode = UnityEngine.Rendering.DefaultReflectionMode.Custom;
+        RenderSettings.customReflectionTexture = null;
+        RenderSettings.fog = false;
+    }
+
+    // The robot stage's 3D half: a camera and three lights on one turning pivot, the holder the robot
+    // stands in, and an inactive staging object robots are built under. See RobotStage for why the
+    // camera orbits and the robot doesn't.
+    private static RobotStage BuildRobotStage(Camera mainCamera, out Camera stageCamera)
+    {
+        GameObject root = new GameObject("RobotStage");
+        RobotStage stage = root.AddComponent<RobotStage>();
+
+        GameObject pivot = new GameObject("StagePivot");
+        pivot.transform.SetParent(root.transform, false);
+        GameObject holder = new GameObject("StageRobotHolder");
+        holder.transform.SetParent(root.transform, false);
+        GameObject staging = new GameObject("StageStaging");
+        staging.transform.SetParent(root.transform, false);
+        staging.SetActive(false);
+
+        GameObject cameraGo = new GameObject("StageCamera");
+        cameraGo.transform.SetParent(pivot.transform, false);
+        stageCamera = cameraGo.AddComponent<Camera>();
+        stageCamera.clearFlags = CameraClearFlags.SolidColor;
+        // Transparent, so the robot composites over the backdrop — but NAVY at zero alpha, not black.
+        // The texture is shown slightly scaled, and bilinear filtering blends each edge pixel of the
+        // robot with its transparent neighbours: black ones would outline every edge in a dark fringe
+        // against the navy, navy ones blend into it.
+        Color clear = Color.Lerp(BackgroundTopColor, BackgroundBottomColor, 0.5f);
+        clear.a = 0f;
+        stageCamera.backgroundColor = clear;
+        stageCamera.cullingMask = 1 << RobotShowcase.LayerIndex;
+        stageCamera.fieldOfView = StageFieldOfView;
+        stageCamera.allowHDR = false;
+        stageCamera.allowMSAA = false;
+        stageCamera.useOcclusionCulling = false;
+        // BELOW the main camera in render order, by a WHOLE number. URP draws this overlay canvas itself,
+        // on whichever camera is both screen-bound and the LAST base camera; one with a target texture is
+        // not screen-bound, so if it sorted last NEITHER camera would draw the UI and the whole home
+        // screen would blink out on every frame the stage draws. Cameras sort on (int)depth, and a tie
+        // leaves the order to an unstable sort — hence a whole number clear of the main camera's.
+        stageCamera.depth = mainCamera.depth - 10f;
+        // RobotStageView switches it on for the frames it draws.
+        stageCamera.enabled = false;
+
+        UniversalAdditionalCameraData stageData = stageCamera.GetUniversalAdditionalCameraData();
+        stageData.renderType = CameraRenderType.Base;
+        stageData.renderShadows = false;
+        stageData.renderPostProcessing = false;
+        stageData.requiresDepthOption = CameraOverrideOption.Off;
+        stageData.requiresColorOption = CameraOverrideOption.Off;
+        stageData.antialiasing = AntialiasingMode.None;
+        stageData.stopNaN = false;
+        stageData.dithering = false;
+        stageData.volumeLayerMask = 0;
+
+        // Three lights on the pivot, so they turn with the camera and the robot is lit the same way from
+        // every angle of the turn. In pivot space the camera looks along +Z, so "front" is -Z. All three
+        // shadowless: a shadowless renderer skips the shadow DRAWS, but only shadowless lights skip the
+        // shadow PASS, and the phone tier has main-light shadows on.
+        //
+        //   key  — warm, from above, front-right
+        //   fill — cool and weaker, from the front-left, lifting what the key leaves in shadow
+        //   rim  — the icon's cyan, from behind and above, catching the top and back edges
+        //
+        // The strengths were MEASURED, not picked: five rigs rendered headlessly on three robots. The stage
+        // camera has no tonemapping (nor does the field), so light much past 1.2 on this near-white aluminium
+        // just clips — a 1.5 key turned 30-41% of every robot pure white, and the V5 motors from dark grey to
+        // white. The fill is what tints: at 0.5 a quarter of each robot read blue, at 0.22 it is 2-4%. The rim
+        // sits 10 degrees up, so it grazes the top and back edges instead of washing the tops cyan.
+        Light key = CreateStageLight("KeyLight", pivot.transform, KeyLightColor, 1.2f, new Vector3(42f, -38f, 0f));
+        CreateStageLight("FillLight", pivot.transform, FillLightColor, 0.22f, new Vector3(12f, 48f, 0f));
+        CreateStageLight("RimLight", pivot.transform, PrimaryBottomColor, 0.9f, new Vector3(10f, 205f, 0f));
+        RenderSettings.sun = key;
+
+        SerializedObject so = new SerializedObject(stage);
+        so.FindProperty("pivot").objectReferenceValue = pivot.transform;
+        so.FindProperty("stageCamera").objectReferenceValue = stageCamera;
+        so.FindProperty("holder").objectReferenceValue = holder.transform;
+        so.FindProperty("staging").objectReferenceValue = staging.transform;
+        so.ApplyModifiedPropertiesWithoutUndo();
+        return stage;
+    }
+
+    private static Light CreateStageLight(string name, Transform pivot, Color color, float intensity, Vector3 euler)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(pivot, false);
+        go.transform.localRotation = Quaternion.Euler(euler);
+        Light light = go.AddComponent<Light>();
+        light.type = LightType.Directional;
+        light.color = color;
+        light.intensity = intensity;
+        light.shadows = LightShadows.None;
+        light.renderMode = LightRenderMode.ForcePixel;
+        light.lightmapBakeType = LightmapBakeType.Realtime;
+        // Documents intent. URP masks lights with rendering layers rather than this, but the stage is the
+        // only 3D thing in the scene, so what these light is the robot either way.
+        light.cullingMask = 1 << RobotShowcase.LayerIndex;
+        return light;
     }
 
     // --- Robot inbox notice ---
