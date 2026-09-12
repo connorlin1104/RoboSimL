@@ -43,6 +43,7 @@ internal static class RoboSimPaths
     public const string UiButtonSprite = UiSpritesFolder + "/RoundedButton.png";
     public const string UiShadowSprite = UiSpritesFolder + "/SoftShadow.png";
     public const string UiSpinnerSprite = UiSpritesFolder + "/SpinnerRing.png";
+    public const string UiChassisSprite = UiSpritesFolder + "/ChassisMark.png";
 
     // The UI's typeface. The TTFs and their OFL licence are committed; the TMP font assets beside
     // them are baked from those by HomeThemeFonts. Both are committed rather than generated on a

@@ -38,6 +38,11 @@ public static class HomeThemeSprites
     private const int SpinnerSize = 128;
     private const float SpinnerThickness = 11f;
 
+    // The chassis mark that stands in for the robot on the stage. Larger than the rest because it
+    // is the only sprite drawn at several hundred units square rather than stretched from a small
+    // 9-sliced tile, so its edges are the only ones seen at their authored resolution.
+    private const int ChassisSize = 512;
+
     // The border is what Image.Type.Sliced protects from stretching. It has to be at least the
     // radius, or the corner arc gets stretched along with the middle and comes out as an ellipse;
     // a couple of pixels past it leaves room for the anti-aliased edge.
@@ -80,6 +85,7 @@ public static class HomeThemeSprites
         written += EnsureRounded(RoboSimPaths.UiButtonSprite, ButtonSize, ButtonRadius, ButtonBorder, force);
         written += EnsureShadow(RoboSimPaths.UiShadowSprite, ShadowSize, force);
         written += EnsureRing(RoboSimPaths.UiSpinnerSprite, SpinnerSize, SpinnerThickness, force);
+        written += EnsureChassis(RoboSimPaths.UiChassisSprite, ChassisSize, force);
         if (written > 0) AssetDatabase.SaveAssets();
         return written;
     }
@@ -201,6 +207,66 @@ public static class HomeThemeSprites
         return outside + Mathf.Min(Mathf.Max(qx, qy), 0f) - radius;
     }
 
+    // The chassis mark: a body on two wheels, standing in for the robot until the stage can render
+    // one for real.
+    //
+    // The stage is half the home screen. Judging the composition against an empty half would be
+    // judging a different layout than the one being built, so the app icon's own silhouette holds
+    // the space at roughly the visual weight the robot will have.
+    //
+    // Drawn as a UNION of signed distances — min() of the three shapes — rather than three sprites
+    // laid over each other. Overlapping alpha would leave a seam everywhere two edges cross, since
+    // each shape's anti-aliased rim is partly transparent and two partly-transparent rims stacked
+    // do not add up to opaque.
+    //
+    // One flat colour, like every other sprite here: the scene tints it with the brand gradient the
+    // same way it tints a panel, so the shape lives in this file and the colour lives in the builder.
+    private static int EnsureChassis(string path, int size, bool force)
+    {
+        if (!force && File.Exists(path)) return 0;
+
+        // Authored against 512 and scaled, so changing ChassisSize alone keeps the proportions.
+        float unit = size / 512f;
+        float centreX = size * 0.5f;
+        float bodyHalfWidth = 168f * unit, bodyHalfHeight = 84f * unit, bodyRadius = 30f * unit;
+        float bodyCentreY = 292f * unit;   // above the middle, leaving the wheels room beneath it
+        float wheelRadius = 62f * unit, wheelOffsetX = 112f * unit, wheelCentreY = 196f * unit;
+
+        var pixels = new Color32[size * size];
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float px = x + 0.5f, py = y + 0.5f;
+                float distance = RoundedBox(px - centreX, py - bodyCentreY,
+                                            bodyHalfWidth, bodyHalfHeight, bodyRadius);
+                distance = Mathf.Min(distance,
+                    Circle(px - (centreX - wheelOffsetX), py - wheelCentreY, wheelRadius));
+                distance = Mathf.Min(distance,
+                    Circle(px - (centreX + wheelOffsetX), py - wheelCentreY, wheelRadius));
+                pixels[y * size + x] = White(Mathf.Clamp01(0.5f - distance));
+            }
+        }
+        WritePng(path, pixels, size, size);
+        ImportSprite(path, 0); // drawn whole at one size: there is nothing to 9-slice
+        return 1;
+    }
+
+    // The same rounded-box distance as SignedRoundedDistance, but measured from a centre the caller
+    // chooses rather than the middle of the texture — which is what a mark made of several shapes
+    // needs and a single centred panel sprite does not.
+    private static float RoundedBox(float dx, float dy, float halfWidth, float halfHeight, float radius)
+    {
+        float qx = Mathf.Abs(dx) - (halfWidth - radius);
+        float qy = Mathf.Abs(dy) - (halfHeight - radius);
+        return Mathf.Sqrt(Mathf.Max(qx, 0f) * Mathf.Max(qx, 0f) +
+                          Mathf.Max(qy, 0f) * Mathf.Max(qy, 0f)) +
+               Mathf.Min(Mathf.Max(qx, qy), 0f) - radius;
+    }
+
+    private static float Circle(float dx, float dy, float radius) =>
+        Mathf.Sqrt(dx * dx + dy * dy) - radius;
+
     private static Color32 White(float alpha) =>
         new Color32(0xFF, 0xFF, 0xFF, (byte)Mathf.Clamp(Mathf.RoundToInt(alpha * 255f), 0, 255));
 
@@ -253,6 +319,7 @@ public static class HomeThemeSprites
     public static Sprite Button => Load(RoboSimPaths.UiButtonSprite);
     public static Sprite Shadow => Load(RoboSimPaths.UiShadowSprite);
     public static Sprite Spinner => Load(RoboSimPaths.UiSpinnerSprite);
+    public static Sprite Chassis => Load(RoboSimPaths.UiChassisSprite);
 
     // Generates on demand rather than requiring EnsureAll to have been called first. Build Drive
     // Controls builds the field-scene buttons from these too and can be run on its own — on a fresh

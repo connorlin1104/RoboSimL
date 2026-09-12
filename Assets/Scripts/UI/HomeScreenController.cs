@@ -23,6 +23,10 @@ public class HomeScreenController : MonoBehaviour
     [Header("Panels")]
     [SerializeField] private GameObject mainPanel;
     [SerializeField] private GameObject settingsPanel;
+    [Tooltip("The left half of the home screen — the title and the robot stage. The main panel and " +
+             "the settings panel dock beside it and leave it showing; the three full-bleed screens " +
+             "below cover the whole canvas, so they hide it. Optional: an older HomeScene has none.")]
+    [SerializeField] private GameObject homeStage;
     [Tooltip("Full-screen loading overlay shown when Drive is pressed. Its click-blocking backdrop stops spam-taps while the field scene loads.")]
     [SerializeField] private GameObject loadingOverlay;
 
@@ -217,6 +221,7 @@ public class HomeScreenController : MonoBehaviour
     {
         if (controllerConfig == null) return; // older scene without the config screen
         if (settingsPanel != null) settingsPanel.SetActive(false);
+        ShowStage(false);
         controllerConfig.Open();
     }
 
@@ -224,12 +229,14 @@ public class HomeScreenController : MonoBehaviour
     {
         if (controllerConfig != null) controllerConfig.Close();
         if (settingsPanel != null) settingsPanel.SetActive(true);
+        ShowStage(true);
     }
 
     public void OnEditLayoutPressed()
     {
         if (controlsLayout == null) return; // older scene without the layout screen
         if (settingsPanel != null) settingsPanel.SetActive(false);
+        ShowStage(false);
         controlsLayout.Open();
     }
 
@@ -237,12 +244,14 @@ public class HomeScreenController : MonoBehaviour
     {
         if (controlsLayout != null) controlsLayout.Close();
         if (settingsPanel != null) settingsPanel.SetActive(true);
+        ShowStage(true);
     }
 
     public void OnSubmitRobotPressed()
     {
         if (submitRobot == null) return; // older scene without the submit screen
         if (settingsPanel != null) settingsPanel.SetActive(false);
+        ShowStage(false);
         submitRobot.Open();
     }
 
@@ -250,6 +259,19 @@ public class HomeScreenController : MonoBehaviour
     {
         if (submitRobot != null) submitRobot.Close();
         if (settingsPanel != null) settingsPanel.SetActive(true);
+        ShowStage(true);
+    }
+
+    // The stage is hidden only for the three screens that cover the canvas edge to edge —
+    // controller config, controls layout, submit a robot. Leaving it drawn under them costs a
+    // redraw of the whole left half for something nobody can see, and any motion on it would show
+    // through the panel's rounded corners.
+    //
+    // The null check is what lets this run against a HomeScene built before the stage existed:
+    // every one of the six callers below would otherwise throw on the first Back press.
+    private void ShowStage(bool visible)
+    {
+        if (homeStage != null) homeStage.SetActive(visible);
     }
 
     // --- Settings tabs ---
