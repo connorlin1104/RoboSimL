@@ -21,7 +21,7 @@ using UnityEngine;
 // WHAT IT DOES NOT TOUCH, deliberately:
 //   - The source model under Assets/Models/Submitted. That file is the only thing a rebuild can
 //     start from and nothing upstream can regenerate it now that CAD is not accepted — see
-//     Docs/Pipeline-Dry-Run.md. Deleting a robot is a routine, repeatable act; losing its source
+//     Docs/Robot-Submissions.md. Deleting a robot is a routine, repeatable act; losing its source
 //     is not, so the two are kept apart.
 //   - The model store, for the same reason: it holds a copy of that same file.
 //   - Anything already published to the bucket. Those objects are addressed by a hash of the owner

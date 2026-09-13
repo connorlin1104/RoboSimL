@@ -75,11 +75,10 @@ to cost real time.
 | --- | --- |
 | `Docs/App-Store-Submission.md` | Every App Store Connect field and the reasoning behind each answer |
 | `Docs/TestFlight-Build.md` | Unity → Xcode → TestFlight, and the traps in that path |
-| `Docs/Robot-Submissions.md` | What happens when a player sends a robot in |
+| `Docs/Robot-Submissions.md` | What happens when a player sends a robot in, and setting one up step by step |
 | `Docs/Robot-Delivery.md` | Decimating, bundling and addressing a finished robot back to its team |
 | `Docs/Model-Storage.md` | Where models live and why a prefab cannot outlive its FBX |
 | `Docs/Fusion360-URDF-Export.md` | Getting a CAD assembly out as something the importer reads |
-| `Docs/Pipeline-Dry-Run.md` | End-to-end rehearsal of the submission pipeline |
 
 ---
 

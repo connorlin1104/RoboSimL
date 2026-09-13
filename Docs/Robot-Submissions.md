@@ -289,16 +289,33 @@ on the submit screen, for the reason in *How a player picks a file* above.
 
 ## Setting up a submission when it arrives
 
+The whole path for one submission, in order. Background lives elsewhere: `Fusion360-URDF-Export.md`
+§A for the FBX export settings, [Robot-Delivery.md](Robot-Delivery.md) for bundles, and
+[Model-Storage.md](Model-Storage.md) for the model store.
+
 1. Download the file and its `.json` sidecar from the Storage bucket.
-2. Decimate it if it is large (Blender, or `Reduce Robot Meshes` after import), then drop it in
-   `Assets/Models/Submitted/`. [Pipeline-Dry-Run.md](Pipeline-Dry-Run.md) is the ordered checklist;
-   `Fusion360-URDF-Export.md` §A covers the FBX export settings themselves.
-3. `Tools ▸ RoboSim ▸ Robot ▸ Set Up Imported Robot` (colliders, drivetrain, catalog entry, prefab,
-   physics smoke test — one click).
-4. Add the mechanisms by hand: `Tools ▸ RoboSim ▸ Robot ▸ Mechanisms ▸ …`.
-5. `Tools ▸ RoboSim ▸ Robot ▸ Save As Robot Prefab`, and set **Listed For** per the sidecar's
+   - The sidecar's `sharing` field decides **Listed For** in step 6.
+2. Decimate it if it is over ~50 MB — see *Decimating instead* above.
+   - Keep the file you decimated from, outside the project. A re-decimation can only start from it,
+     and nothing upstream can regenerate it now that CAD is refused.
+3. Copy the `.fbx` into `Assets/Models/Submitted/` — the `.fbx` only, never a `.fbx.meta`.
+   - Stow only takes models from that folder, and git ignores it, so nothing there reaches LFS.
+4. Drag it into SampleScene, right-click the instance ▸ `Prefab ▸ Unpack Completely`, select the
+   root, and run `Tools ▸ RoboSim ▸ Robot ▸ Set Up Imported Robot`.
+   - Unpack first, every time: rigging reparents the wheels, which a prefab instance can't record,
+     and Set Up Imported Robot doesn't warn you.
+   - Expect "Detected: mesh/FBX robot."
+   - Set **Wheel Name Contains** to a token in the wheel nodes' names; comma-separate several.
+   - Leave **Save As Prefab After** on. One click gives colliders, motorized wheels, the catalog
+     entry, `Assets/Robots/<Name>.prefab` and a physics smoke test, then removes the scene copy and
+     saves the scene.
+   - Lying on its side? Tick **Bake Axis Conversion** on the FBX (Model tab), or rotate the root —
+     the spawner keeps an authored orientation.
+5. Add the mechanisms, if it has any: open the prefab (the builders that reparent need Prefab
+   Mode), then `Tools ▸ RoboSim ▸ Robot ▸ Mechanisms ▸ …`.
+6. `Tools ▸ RoboSim ▸ Robot ▸ Save As Robot Prefab`, and set **Listed For** per the sidecar's
    `sharing` field — **Public** for "Anyone", **Private** with an owner code otherwise.
-6. Set up the home-stage chips — the row under the robot's name on the home screen
+7. Set up the home-stage chips — the row under the robot's name on the home screen
    (**44 W Drive**, **22 W Cascade**, **Claw**):
    - Run `Tools ▸ RoboSim ▸ Scenes ▸ Build Home Screen`. It reads the lift (Cascade / DR4B), a
      Floating Intake and a Claw off the saved rig.
@@ -309,10 +326,35 @@ on the submit screen, for the reason in *How a player picks a file* above.
    - Fix a wrong label with its popup: **Always** or **Never**. **Clamp** shows only on
      **Always** — nothing detects a clamp yet.
    - Check the preview line at the top, and clear any yellow warning.
-   - Served from Storage? Set the chips before building its bundle: they travel in the robot's
-     index, so a later change means Build Robot Bundle and the upload again
-     ([Robot-Delivery.md](Robot-Delivery.md) steps 2–3).
-7. Tell the player it's ready, by writing their inbox file (below).
+   - Change them after publishing and step 8 needs redoing: a Storage robot's chips travel in its
+     index.
+8. Build and publish its bundle: `Tools ▸ RoboSim ▸ Robot ▸ Build Robot Bundle`.
+   - Pick the robot first. The window opens on the first catalog entry, the 360 RPM Drivetrain,
+     and Remove From Binary on that one takes the free robot out of the app.
+   - Have **Serve From Storage** and **Remove From Binary** on, and iOS and Android ticked (the
+     defaults). A greyed-out platform means its build module isn't installed.
+   - Upload `robots/` as the report says ([Robot-Delivery.md](Robot-Delivery.md) step 3), then
+     probe the download URL. A 403 is the storage rules, not the upload.
+9. Play, spawn it and drive it — this is the robot as players will get it.
+10. Tell the player it's ready, by writing their inbox file (below).
+11. Reclaim the disk, whenever: `Tools ▸ RoboSim ▸ Robot ▸ Model Store` → **Stow**.
+    - Check SampleScene has no robot instance first; delete it and save if one crept back in. A
+      model a scene references can never be stowed.
+    - Pre-flight: `Tools ▸ RoboSim ▸ Robot ▸ Advanced ▸ Check Model Store Round-Trip`. A failure
+      there is the tool, not the robot — stop.
+    - A refusal names its cause:
+      - "still has a direct prefab reference in the catalog": Remove From Binary was off.
+      - "referenced by 2 files" / "is a scene, not a prefab": the SampleScene check above.
+      - "only N of them resolve": the robot was broken before you stowed it.
+    - Play and spawn it again with the FBX gone. It must look and drive exactly as in step 9.
+    - To rebuild it later: Model Store → **Fetch**. Expect `N/N resolved` and
+      `finger <hash> (matches)`.
+
+- **Starting a robot over:** `Tools ▸ RoboSim ▸ Robot ▸ Delete Robot`. Never delete just the
+  prefab: the catalog entry survives, the spawner falls back to the old bundle, and the previous
+  version spawns — which looks exactly like the editor caching something.
+- **Never delete a submitted FBX; stow it.** Rebuilding after any change to the setup tools starts
+  from that file. The store lives on one Mac, so back it up.
 
 **When it doesn't work, say so.** Some submissions can't be made to drive: the export is one welded
 lump with nothing to pivot, the file is a render mesh with no separable components, half the assembly
