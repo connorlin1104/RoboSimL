@@ -97,6 +97,10 @@ public class HomeScreenController : MonoBehaviour
     [Tooltip("Checkbox for the lite field (persisted via FieldSceneSettings). Loads the stripped-down LiteScene instead of the full field — far cheaper to run.")]
     [SerializeField] private Toggle liteFieldToggle;
 
+    [Header("Performance")]
+    [Tooltip("Checkbox for the performance readout (persisted via PerformanceStatsSettings). Puts PerfOverlay up — frame times, heat, memory — and logs them to the app's Files folder.")]
+    [SerializeField] private Toggle performanceStatsToggle;
+
     [Header("Robot Codes")]
     [Tooltip("Where the player types an owner code to reveal a private robot (RobotOwnerSettings).")]
     [SerializeField] private TMP_InputField robotCodeInput;
@@ -160,6 +164,7 @@ public class HomeScreenController : MonoBehaviour
         InitAutomaticMatchloadControl();
         InitReverseDriveControl();
         InitLiteFieldControl();
+        InitPerformanceStatsControl();
         InitDriveFeelControls();
         SetTab(0);
         SetCodeStatus(string.Empty);
@@ -197,6 +202,7 @@ public class HomeScreenController : MonoBehaviour
         // LoadScene.
         if (isLoading) return;
         isLoading = true;
+        PerfLog.Report(PerfLog.LoadRequested, FieldSceneSettings.ActiveFieldScene);
         if (loadingOverlay != null) loadingOverlay.SetActive(true);
         StartCoroutine(LoadFieldScene());
     }
@@ -918,5 +924,21 @@ public class HomeScreenController : MonoBehaviour
 
         liteFieldToggle.SetIsOnWithoutNotify(FieldSceneSettings.UseLiteField);
         liteFieldToggle.onValueChanged.AddListener(value => FieldSceneSettings.UseLiteField = value);
+    }
+
+    // --- Performance stats ---
+
+    // Same pattern again, except that flipping it acts at once: the readout goes up or comes down now, rather than at the
+    // next Drive. PerfOverlay puts itself up at launch when the switch was left on.
+    private void InitPerformanceStatsControl()
+    {
+        if (performanceStatsToggle == null) return;
+
+        performanceStatsToggle.SetIsOnWithoutNotify(PerformanceStatsSettings.Show);
+        performanceStatsToggle.onValueChanged.AddListener(value =>
+        {
+            PerformanceStatsSettings.Show = value;
+            PerfOverlay.SetShown(value);
+        });
     }
 }

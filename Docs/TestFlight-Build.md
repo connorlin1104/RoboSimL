@@ -178,6 +178,14 @@ restricted network").
 
 ---
 
+## G. Performance check (optional)
+
+- Any build whose Settings ▸ Robot page ends in a **Performance** section can measure itself on the
+  phone: frame times, heat, memory, launch and load times, logged to Files
+- The runs and how to get the logs off the phone: `Device-Performance.md`
+
+---
+
 ## Settings verified 2026-09-08
 
 Read out of `ProjectSettings/ProjectSettings.asset` — no action needed, listed so a later change

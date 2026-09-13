@@ -12,6 +12,7 @@ public class SceneNavButton : MonoBehaviour
 
     public void Load()
     {
+        PerfLog.Report(PerfLog.LoadRequested, sceneName);
         SceneManager.LoadScene(sceneName);
     }
 }

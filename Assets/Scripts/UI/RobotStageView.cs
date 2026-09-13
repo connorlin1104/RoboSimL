@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -91,6 +92,12 @@ public class RobotStageView : MonoBehaviour,
     private bool hasPendingEntry;
     private RobotModelCatalog.Entry pendingEntry;
     private float pendingAt;
+    private double queuedAt;
+    // For the performance overlay (PerfLog): the robot last put up, reported once it is drawn and showing.
+    private bool reportPending;
+    private string reportRobot;
+    private bool reportCached;
+    private double reportBuildMs;
 
     void OnEnable()
     {
@@ -123,11 +130,39 @@ public class RobotStageView : MonoBehaviour,
         pendingEntry = entry;
         hasPendingEntry = true;
         pendingAt = Time.unscaledTime + (immediately ? 0f : SwapDelay);
+        queuedAt = Time.realtimeSinceStartupAsDouble;
     }
+
+    // Changes the mode while the app runs, and puts the robot up again so the change shows at once: Off takes it down to
+    // the chassis mark, Drift and Still bring it back. The performance overlay's stage button uses it to measure what the
+    // stage costs; the store screenshot tool holds the robot Still while it captures.
+    public void SetMode(StageMode value)
+    {
+        if (mode == value) return;
+        mode = value;
+        // Only Drift turns under a finger. One left down would fling the robot the moment Drift came back.
+        if (pointer != NoPointer && stage != null) stage.Release(0f);
+        pointer = NoPointer;
+        if (catalog != null) Queue(catalog.SelectedModel, immediately: true);
+    }
+
+    // True once the stage shows what it should: nothing to show, or the robot drawn into a texture made for the view as
+    // it is now. The store screenshot tool waits for it after changing the Game view's size, which makes a new texture.
+    public bool Settled => !hasPendingEntry && (!hasRobot || (view != null && view.enabled && !renderPending));
 
     private void Show(RobotModelCatalog.Entry entry)
     {
+        bool cached = stage != null && stage.IsBuilt(entry);
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
         hasRobot = mode != StageMode.Off && stage != null && stage.Show(entry);
+        // Building a robot that isn't cached is the stage's one real hitch, so it is timed on its own.
+        reportPending = hasRobot && PerfLog.Listening;
+        if (reportPending)
+        {
+            reportRobot = entry.id;
+            reportCached = cached;
+            reportBuildMs = (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        }
         if (fallbackMark != null) fallbackMark.SetActive(!hasRobot);
         renderPending = true;
         ShowCaption(entry);
@@ -205,6 +240,19 @@ public class RobotStageView : MonoBehaviour,
         stageCamera.enabled = render;
         bool visible = hasRobot && texture != null && drawsIntoTexture >= DrawsBeforeShowing;
         if (view.enabled != visible) view.enabled = visible;
+        if (visible && reportPending) ReportShown();
+    }
+
+    // How long the robot took: to build (0 when it was cached), and from being asked for to showing — which includes
+    // the wait that stops a scrub down the picker building every robot it passes.
+    private void ReportShown()
+    {
+        reportPending = false;
+        double readyMs = (Time.realtimeSinceStartupAsDouble - queuedAt) * 1000.0;
+        PerfLog.Report(PerfLog.StageRobotShown,
+            $"robot={reportRobot} {(reportCached ? "cached" : "built")} " +
+            $"build_ms={reportBuildMs.ToString("0.0", CultureInfo.InvariantCulture)} " +
+            $"ready_ms={readyMs.ToString("0", CultureInfo.InvariantCulture)}");
     }
 
     // True when there is a texture the camera can draw into this frame.

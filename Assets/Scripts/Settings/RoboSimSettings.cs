@@ -499,3 +499,19 @@ public static class RobotInboxSettings
         PlayerPrefs.Save();
     }
 }
+
+// Whether the performance readout (PerfOverlay) is on: frame times, heat and memory in the corner of every screen,
+// and logged to a file in the app's Files folder. Off by default — it is for measuring the app on a phone, not for
+// playing it. Settings > Robot > Performance. The overlay reads it at launch, so a launch is measured from its first
+// frame when the switch was left on.
+public static class PerformanceStatsSettings
+{
+    public const string ShowPrefKey = "ShowPerformanceStats";
+    public const bool DefaultShow = false;
+
+    public static bool Show
+    {
+        get => SettingsPrefs.GetBool(ShowPrefKey, DefaultShow);
+        set => SettingsPrefs.SetBool(ShowPrefKey, value);
+    }
+}

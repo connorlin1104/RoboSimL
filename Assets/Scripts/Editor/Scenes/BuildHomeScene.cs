@@ -52,7 +52,7 @@ public class BuildHomeScene
     // A version stamp turns "did I remember to add a check for this?" — a judgement call that has
     // to be made correctly every time — into a one-line bump. It is also the ONLY thing that can
     // catch a change with no object footprint at all, which an added component is.
-    internal const string HomeSceneStamp = "HomeSceneStamp_v8";
+    internal const string HomeSceneStamp = "HomeSceneStamp_v9";
 
     // The theme, derived from the app icon (Assets/Icons/AppIcon.png) rather than invented.
     //
@@ -410,7 +410,7 @@ public class BuildHomeScene
                IsRefSet(so, "privateEmptyLabel") && IsRefSet(so, "modelButtonTemplate") &&
                IsRefSet(so, "publicListViewport") && IsRefSet(so, "privateListViewport") &&
                IsRefSet(so, "automaticMatchloadToggle") && IsRefSet(so, "liteFieldToggle") &&
-               IsRefSet(so, "reverseDriveToggle") &&
+               IsRefSet(so, "reverseDriveToggle") && IsRefSet(so, "performanceStatsToggle") &&
                IsRefSet(so, "robotCodeInput") && IsRefSet(so, "robotCodeStatusLabel") &&
                IsRefSet(so, "yourCodesLabel") &&
                IsRefSet(so, "submitRobot") && IsRefSet(so, "uploadConfig") &&
@@ -943,6 +943,14 @@ public class BuildHomeScene
             "Lite Field (faster)", FieldSceneSettings.DefaultUseLiteField);
         SetLayoutHeight(liteFieldToggle.gameObject, 64f);
 
+        // The performance readout: checkbox (persisted via PerformanceStatsSettings), acting at once through
+        // PerfOverlay. A visible switch rather than a hidden gesture — App Review treats a feature hidden from the
+        // reviewer as a guideline 2.3.1 problem, and the TestFlight build is the build that gets submitted.
+        CreateSectionHeader(robotPage.transform, "SectionPerformance", "Performance");
+        Toggle performanceStatsToggle = CreateToggle("PerformanceStatsToggle", robotPage.transform,
+            "Show Performance Stats", PerformanceStatsSettings.DefaultShow);
+        SetLayoutHeight(performanceStatsToggle.gameObject, 64f);
+
         // --- Controls page ---
         GameObject controlsPage = CreateTabPage(content, "SettingsPage_Controls");
 
@@ -1123,6 +1131,7 @@ public class BuildHomeScene
         so.FindProperty("automaticMatchloadToggle").objectReferenceValue = autoMatchloadToggle;
         so.FindProperty("reverseDriveToggle").objectReferenceValue = reverseDriveToggle;
         so.FindProperty("liteFieldToggle").objectReferenceValue = liteFieldToggle;
+        so.FindProperty("performanceStatsToggle").objectReferenceValue = performanceStatsToggle;
         so.FindProperty("robotCodeInput").objectReferenceValue = robotCodeInput;
         so.FindProperty("robotCodeStatusLabel").objectReferenceValue = robotCodeStatus;
         so.FindProperty("yourCodesLabel").objectReferenceValue = yourCodesLabel;
