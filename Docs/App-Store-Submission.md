@@ -219,8 +219,12 @@ Landscape only (the app is landscape-locked).
 
 | Device | Size | Count |
 | --- | --- | --- |
-| iPhone 6.9" | 2868 x 1320 | 3-10 (do at least 4) |
+| iPhone 6.5" | 2778 x 1284 | 3-10 (do at least 4) |
 | iPad 13" | 2752 x 2064 | 3-10 — required, iPad is a supported device |
+
+- **Not 2868 x 1320** (iPhone 6.9"): App Store Connect doesn't accept it for this app (2026-09-13)
+  - 1.0's iPhone shots were captured at 2868 x 1320, then resized to 2778 x 1284 and had their alpha
+    channel stripped by hand before they went up. The capture tool now does both itself
 
 - Shoot, in this order: robot mid-drive with controls visible; claw holding a cup; lift raised;
   the controls config screen; the robot picker
@@ -229,14 +233,27 @@ Landscape only (the app is landscape-locked).
 
 **Capturing both sizes with no device and no Xcode simulator:**
 
-1. Game view -> resolution dropdown -> `+` -> add `Fixed Resolution` `2868 x 1320` and `2752 x 2064`
-2. **Set the Scale slider to 1x** — above 1x Unity renders at the window's size, not the target's,
-   and you get a correctly-framed shot at the wrong pixel count
-3. Enter Play mode, drive to the shot, press **Cmd+Shift+S**
-   (or **Tools -> RoboSim -> Utilities -> Capture Game View**)
+1. Enter Play mode and get to the shot
+   - Pause first (Cmd+Shift+P) if you want an exact moment. The tool freezes the game either way
+2. Press **Cmd+Shift+S** (or **Tools -> RoboSim -> Utilities -> Capture Store Screenshots**)
+   - It sets the Game view to 2778 x 1284, captures, sets it to 2752 x 2064, captures, then puts the
+     Game view back the way it found it
+   - Game time stands still while it works and the home stage holds its robot still, so both files
+     are the same moment
+   - The performance readout is hidden while it captures
+3. Check the Console for `[Screenshots] Shot 01, both sizes: ...`
 
-- Output: `StoreScreenshots/` beside `Assets/`, named for the size captured
-- A capture that misses an accepted size is named `WRONG-SIZE` and warns in the console
+- Output: `StoreScreenshots/` beside `Assets/`, one number per shot for both sizes —
+  `iPhone-6.5-2778x1284-01.png` and `iPad-13-2752x2064-01.png`
+  - A new shot takes one past the highest number already in the folder, counting only files at its
+    top level. Move 1.0's 01-08 out, or into a subfolder, to start 1.1 at 01
+  - The folder is gitignored, and App Review never sees it: App Store Connect keeps its own copy of
+    what you upload. Deleting a set after it's up changes nothing there
+- Saved as plain RGB with no alpha channel — App Store Connect refuses a PNG that has one
+- It stops and says so if a capture comes out the wrong size. The fix is the Game view's Scale slider:
+  1x or lower (above 1x Unity renders at the window's size, not the target's)
+- `Validate Store Screenshots` checks the alpha comes out and the numbering; the capture itself is
+  checked by using it
 - Why this is valid, not a shortcut:
   - Nothing reads `Screen.safeArea`, and the UI is one `ScaleWithScreenSize` canvas
     (1920x1080 ref, match 0.5) — layout is a pure function of render resolution
@@ -457,7 +474,8 @@ a second Hosting site (`firebase hosting:sites:create robosim`) and point the li
   - [x] ~~`microphoneUsageDescription` cleared~~
 - **Screenshots**
   - [x] ~~iPhone 6.9" — 2868 x 1320~~ — 8 captured 2026-09-09, every file verified at exactly
-        2868 x 1320
+        2868 x 1320. What went up was a 2778 x 1284 (6.5") resize of them with the alpha stripped,
+        done by hand: App Store Connect doesn't accept 2868 x 1320 for this app
   - [x] ~~iPad 13" — 2752 x 2064, Game view Scale slider at 1x~~ — 8 captured, all exactly
         2752 x 2064. First real use of `StoreScreenshotCapture`, and the 4:3 layout it renders had
         never been seen before: nothing clips, and the lowest controls clear the bottom edge by
