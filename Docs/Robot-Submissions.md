@@ -298,7 +298,21 @@ on the submit screen, for the reason in *How a player picks a file* above.
 4. Add the mechanisms by hand: `Tools ▸ RoboSim ▸ Robot ▸ Mechanisms ▸ …`.
 5. `Tools ▸ RoboSim ▸ Robot ▸ Save As Robot Prefab`, and set **Listed For** per the sidecar's
    `sharing` field — **Public** for "Anyone", **Private** with an owner code otherwise.
-6. Tell the player it's ready, by writing their inbox file (below).
+6. Set up the home-stage chips — the row under the robot's name on the home screen
+   (**44 W Drive**, **22 W Cascade**, **Claw**):
+   - Run `Tools ▸ RoboSim ▸ Scenes ▸ Build Home Screen`. It reads the lift (Cascade / DR4B), a
+     Floating Intake and a Claw off the saved rig.
+   - Open `Tools ▸ RoboSim ▸ Robot ▸ Model Catalog`, pick the robot, find **Home stage chips**.
+   - Type **Drivetrain watts** and the lift's watts (11 per 11 W motor, 5.5 per 5.5 W motor).
+     - The line under them is the CAD's motor total, not the split: ask the team which motors
+       drive what.
+   - Fix a wrong label with its popup: **Always** or **Never**. **Clamp** shows only on
+     **Always** — nothing detects a clamp yet.
+   - Check the preview line at the top, and clear any yellow warning.
+   - Served from Storage? Set the chips before building its bundle: they travel in the robot's
+     index, so a later change means Build Robot Bundle and the upload again
+     ([Robot-Delivery.md](Robot-Delivery.md) steps 2–3).
+7. Tell the player it's ready, by writing their inbox file (below).
 
 **When it doesn't work, say so.** Some submissions can't be made to drive: the export is one welded
 lump with nothing to pivot, the file is a render mesh with no separable components, half the assembly
