@@ -23,6 +23,9 @@ public class RobotCatalogIndex
         public string bundleVersion;
         public int scriptVersion;
         public List<RobotModelCatalog.MechanismInfo> mechanisms = new List<RobotModelCatalog.MechanismInfo>();
+        // What the home stage's chips say. An index published before the chips existed has none, and its
+        // robots show their name alone — which is what every robot showed before.
+        public RobotModelCatalog.Highlights highlights = new RobotModelCatalog.Highlights();
     }
 
     public List<Robot> robots = new List<Robot>();
@@ -155,6 +158,7 @@ public static class RobotCatalogSync
                     // the code that opened the door is the code that reveals what's behind it.
                     ownerCode = ownerCode ?? string.Empty,
                     mechanisms = robot.mechanisms ?? new List<RobotModelCatalog.MechanismInfo>(),
+                    highlights = robot.highlights ?? new RobotModelCatalog.Highlights(),
                     bundle = new RobotModelCatalog.BundleRef
                     {
                         id = robot.bundleId,

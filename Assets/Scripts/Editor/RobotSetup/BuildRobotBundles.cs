@@ -455,6 +455,10 @@ public static class BuildRobotBundles
         string folder = RobotBundleAddress.Folder(entry);
         var index = new RobotCatalogIndex();
 
+        // The chips a phone shows for these robots are read from here, so first bring what each robot's rig
+        // says up to date — it may have been re-rigged since Build Home Screen last ran.
+        RobotHighlightDetection.Refresh(catalog);
+
         foreach (RobotModelCatalog.Entry candidate in catalog.models)
         {
             if (candidate == null || candidate.bundle == null || !candidate.bundle.IsSet) continue;
@@ -470,6 +474,7 @@ public static class BuildRobotBundles
                 bundleVersion = candidate.bundle.version,
                 scriptVersion = candidate.bundle.scriptVersion,
                 mechanisms = candidate.mechanisms,
+                highlights = candidate.highlights,
             });
         }
 

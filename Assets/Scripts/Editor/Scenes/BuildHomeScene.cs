@@ -52,7 +52,7 @@ public class BuildHomeScene
     // A version stamp turns "did I remember to add a check for this?" — a judgement call that has
     // to be made correctly every time — into a one-line bump. It is also the ONLY thing that can
     // catch a change with no object footprint at all, which an added component is.
-    internal const string HomeSceneStamp = "HomeSceneStamp_v7";
+    internal const string HomeSceneStamp = "HomeSceneStamp_v8";
 
     // The theme, derived from the app icon (Assets/Icons/AppIcon.png) rather than invented.
     //
@@ -137,6 +137,21 @@ public class BuildHomeScene
     private const float StageTitleBand = 140f;
     private const float StageCaptionBand = 140f;
 
+    // The chips under the robot's name (RobotModelCatalog.Highlights). Five slots, which is every chip a robot
+    // can have: a drivetrain, a lift and three labels. Sized so all five, carrying the widest watts, fit the
+    // narrowest stage — the 13" iPad's 867 units — which Validate Home Stage measures with the real font. The
+    // corner is the button sprite's over StageChipRoundness: more than a 40-unit chip can hold, so the Image
+    // scales it back to fit and the ends come out nearly round. Filled with the menu card's own navy, opaque:
+    // a translucent white was tried first, and blended in linear light it came out a flat grey that the cyan
+    // watts read on at barely 2:1.
+    internal const int StageChipSlots = 5;
+    private const float StageChipHeight = 40f;
+    private const float StageChipSpacing = 10f;
+    private const int StageChipPadding = 16;
+    private const float StageChipFontSize = 22f;
+    private const float StageChipRoundness = 0.7f;
+    private static readonly Color StageChipColor = PanelTopColor;
+
     // A long lens. A wide one exaggerates perspective, and on a CAD model of square tube and flat plate
     // that reads as a boxy fish-eye; 26 degrees flattens it toward the product-shot look.
     private const float StageFieldOfView = 26f;
@@ -200,6 +215,10 @@ public class BuildHomeScene
         //     last bake, so this costs nothing on a re-run.
         string showcaseStatus = BuildShowcasePrefabs.EnsureAll(catalog);
 
+        // 2c) What the stage's chips can learn from each robot's rig — its lift, a Floating Intake, a claw —
+        //     written into the catalog the scene reads at runtime. Saved only when a robot has changed.
+        string chipsStatus = RobotHighlightDetection.Refresh(catalog);
+
         string previousScenePath = SceneManager.GetActiveScene().path;
         if (interactive && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
         {
@@ -259,7 +278,7 @@ public class BuildHomeScene
         Debug.Log($"Build Home Scene: TMP essentials {(tmpImported ? "imported" : "already present")}, " +
                   $"catalog {(catalogCreated ? "created at " + RoboSimPaths.RobotModelCatalog : "found")}, " +
                   $"upload config {(uploadConfigCreated ? "created at " + RoboSimPaths.RobotUploadConfig + " (fill in the Firebase bucket + key to switch submissions on)" : "found")}, " +
-                  $"showcases {showcaseStatus}, HomeScene {rebuildStatus}, build settings = [HomeScene, SampleScene], " +
+                  $"showcases {showcaseStatus}, chips {chipsStatus}, HomeScene {rebuildStatus}, build settings = [HomeScene, SampleScene], " +
                   $"field Home button {homeButtonStatus}, controls appearance {appearanceStatus}.");
     }
 
@@ -314,6 +333,7 @@ public class BuildHomeScene
         // camera, three lights and two holders — plain Transforms, which FindDescendantRect is blind to.
         if (FindDescendantRect(scene, "StageRobotView") == null) return false;
         if (FindDescendantRect(scene, "StageCaption") == null) return false;
+        if (FindDescendantRect(scene, "StageRobotChips") == null) return false;
         if (FindDescendantTransform(scene, "RobotStage") == null) return false;
         if (FindDescendantTransform(scene, "StagePivot") == null) return false;
         if (FindDescendantTransform(scene, "StageCamera") == null) return false;
@@ -363,6 +383,9 @@ public class BuildHomeScene
         // The drive-feel hint paragraph under the sensitivity sliders is gone (2026-09-01):
         // the sliders' own percent labels say what they do.
         if (FindDescendantRect(scene, "DriveFeelHint") != null) return false;
+        // The stage's line naming every one of a robot's mechanisms gave way to chips for the few that
+        // matter (2026-09-12).
+        if (FindDescendantRect(scene, "StageRobotMechanisms") != null) return false;
 
         // The stage view holds its own refs — to the catalog it listens to, the rig it drives and the
         // labels it fills — so a scene built with the view but without them still has to rebuild.
@@ -374,7 +397,8 @@ public class BuildHomeScene
         if (stageView == null) return false;
         SerializedObject viewSo = new SerializedObject(stageView);
         if (!IsRefSet(viewSo, "catalog") || !IsRefSet(viewSo, "stage") || !IsRefSet(viewSo, "stageCamera") ||
-            !IsRefSet(viewSo, "fallbackMark") || !IsRefSet(viewSo, "nameLabel") || !IsRefSet(viewSo, "mechanismsLabel"))
+            !IsRefSet(viewSo, "fallbackMark") || !IsRefSet(viewSo, "nameLabel") || !IsRefSet(viewSo, "chipRow") ||
+            !IsArrayFilled(viewSo, "chipLabels"))
             return false;
 
         SerializedObject so = new SerializedObject(controller);
@@ -699,8 +723,8 @@ public class BuildHomeScene
         stageImage.enabled = false;
         RobotStageView stageView = stageViewGo.AddComponent<RobotStageView>();
 
-        // The caption band under the window: the robot's name, and its mechanisms beneath in muted type.
-        // A layout group, so hiding the mechanism line for a robot that has none re-centres the name.
+        // The caption band under the window: the robot's name, and a row of chips beneath it. A layout group,
+        // so hiding the row for a robot that has no chips re-centres the name.
         GameObject stageCaption = CreateUIObject("StageCaption", stageRegion.transform);
         RectTransform captionRect = (RectTransform)stageCaption.transform;
         captionRect.anchorMin = Vector2.zero;
@@ -720,14 +744,21 @@ public class BuildHomeScene
         stageName.raycastTarget = false;
         SetLayoutHeight(stageName.gameObject, 56f);
 
-        TextMeshProUGUI stageMechanisms = CreateText("StageRobotMechanisms", stageCaption.transform, string.Empty, 24f);
-        stageMechanisms.color = TextMutedColor;
-        stageMechanisms.textWrappingMode = TextWrappingModes.NoWrap;
-        stageMechanisms.enableAutoSizing = true;
-        stageMechanisms.fontSizeMin = 18f;
-        stageMechanisms.fontSizeMax = 24f;
-        stageMechanisms.raycastTarget = false;
-        SetLayoutHeight(stageMechanisms.gameObject, 34f);
+        // The chips: the drivetrain's and the lift's watts, then a label for each mechanism worth naming. A fixed
+        // row of slots, each saved switched off; RobotStageView fills in and turns on as many as the robot has.
+        // Forced to the row's height, so every chip is the same height whatever its text.
+        GameObject stageChips = CreateUIObject("StageRobotChips", stageCaption.transform);
+        HorizontalLayoutGroup chipsLayout = stageChips.AddComponent<HorizontalLayoutGroup>();
+        chipsLayout.spacing = StageChipSpacing;
+        chipsLayout.childAlignment = TextAnchor.MiddleCenter;
+        chipsLayout.childControlWidth = true;
+        chipsLayout.childControlHeight = true;
+        chipsLayout.childForceExpandWidth = false;
+        chipsLayout.childForceExpandHeight = true;
+        SetLayoutHeight(stageChips, StageChipHeight);
+        var stageChipLabels = new TextMeshProUGUI[StageChipSlots];
+        for (int slot = 0; slot < StageChipSlots; slot++)
+            stageChipLabels[slot] = CreateStageChip(stageChips.transform, slot + 1);
 
         // Title. "RoboSimL" is 8 glyphs and fits at full size on every canvas we target, so the
         // autosize range below no longer does any work — it is kept because it costs nothing and is
@@ -1191,7 +1222,12 @@ public class BuildHomeScene
         viewSo.FindProperty("stageCamera").objectReferenceValue = stageCamera;
         viewSo.FindProperty("fallbackMark").objectReferenceValue = chassisMark;
         viewSo.FindProperty("nameLabel").objectReferenceValue = stageName;
-        viewSo.FindProperty("mechanismsLabel").objectReferenceValue = stageMechanisms;
+        viewSo.FindProperty("chipRow").objectReferenceValue = stageChips;
+        SerializedProperty chipSlots = viewSo.FindProperty("chipLabels");
+        chipSlots.arraySize = stageChipLabels.Length;
+        for (int slot = 0; slot < stageChipLabels.Length; slot++)
+            chipSlots.GetArrayElementAtIndex(slot).objectReferenceValue = stageChipLabels[slot];
+        viewSo.FindProperty("wattsColor").colorValue = SelectedColor;
         viewSo.ApplyModifiedPropertiesWithoutUndo();
 
         UnityEventTools.AddPersistentListener(driveButton.onClick, controller.OnDrivePressed);
@@ -1316,6 +1352,31 @@ public class BuildHomeScene
         so.FindProperty("staging").objectReferenceValue = staging.transform;
         so.ApplyModifiedPropertiesWithoutUndo();
         return stage;
+    }
+
+    // One of the stage's chips: a rounded fill, with its label padded inside it. Saved switched off.
+    private static TextMeshProUGUI CreateStageChip(Transform row, int number)
+    {
+        GameObject chip = CreateUIObject($"StageChip{number}", row);
+        Image fill = chip.AddComponent<Image>();
+        fill.sprite = HomeThemeSprites.Button;
+        fill.type = Image.Type.Sliced;
+        fill.pixelsPerUnitMultiplier = StageChipRoundness;
+        fill.color = StageChipColor;
+        fill.raycastTarget = false;
+        HorizontalLayoutGroup inside = chip.AddComponent<HorizontalLayoutGroup>();
+        inside.padding = new RectOffset(StageChipPadding, StageChipPadding, 0, 0);
+        inside.childAlignment = TextAnchor.MiddleCenter;
+        inside.childControlWidth = true;
+        inside.childControlHeight = true;
+        inside.childForceExpandWidth = false;
+        inside.childForceExpandHeight = true;
+
+        TextMeshProUGUI label = CreateText("Label", chip.transform, string.Empty, StageChipFontSize);
+        label.textWrappingMode = TextWrappingModes.NoWrap;
+        label.raycastTarget = false;
+        chip.SetActive(false);
+        return label;
     }
 
     private static Light CreateStageLight(string name, Transform pivot, Color color, float intensity, Vector3 euler)

@@ -1,8 +1,9 @@
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-// The authoring surface for the robot catalog: remove an entry, and publish a robot's default
-// button layout.
+// The authoring surface for the robot catalog: remove an entry, publish a robot's default button
+// layout, and type what the home stage's chips say about it.
 //
 // Both of these used to live in the game, behind an "Edit Models" button on the home screen. That
 // was a mistake in two different ways and it is worth writing down, because the shape of the
@@ -28,6 +29,9 @@ public class ModelCatalogWindow : EditorWindow
     private RobotModelCatalog catalog;
     private Vector2 scroll;
     private string status;
+    // Each robot's CAD motors, counted once while the window is open: it walks every part of the robot.
+    private readonly Dictionary<string, RobotHighlightDetection.Motors> motorCounts =
+        new Dictionary<string, RobotHighlightDetection.Motors>();
 
     [MenuItem("Tools/RoboSim/Robot/Model Catalog", false, 10)]
     private static void Open()
@@ -55,7 +59,10 @@ public class ModelCatalogWindow : EditorWindow
             "back (UrdfPostProcessor.UpsertCatalogEntry). To retire a robot for good, delete its " +
             "prefab as well.\n\n" +
             "\"Make Current Bindings the Default\" publishes whatever THIS machine currently has " +
-            "bound for that robot as the layout every fresh install starts with.", MessageType.None);
+            "bound for that robot as the layout every fresh install starts with.\n\n" +
+            "Home stage chips: type the watts the drivetrain and the lift use. The lift, Floating " +
+            "Intake and Claw labels are worked out from the robot whenever Build Home Screen runs, and " +
+            "each can be forced on or off here.", MessageType.None);
 
         if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.Info);
 
@@ -114,6 +121,8 @@ public class ModelCatalogWindow : EditorWindow
                 (defaults > 0 ? $"{defaults} default button(s)" : "no shipped default layout"),
                 EditorStyles.miniLabel);
 
+            DrawHighlights(entry);
+
             // Deferred, never called inline — see Defer.
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -123,6 +132,78 @@ public class ModelCatalogWindow : EditorWindow
                     Defer(() => Remove(entry));
             }
         }
+    }
+
+    // The home stage's chips for this robot: the two numbers typed here, the labels worked out from the robot
+    // (each with a setting that can force it), and the total its CAD's motors come to — which the numbers are
+    // checked against, the same check Validate Home Stage fails on.
+    private void DrawHighlights(RobotModelCatalog.Entry entry)
+    {
+        RobotModelCatalog.Highlights highlights = entry.highlights ?? new RobotModelCatalog.Highlights();
+        List<RobotModelCatalog.Highlights.Chip> chips = highlights.Chips();
+
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("Home stage chips", EditorStyles.miniBoldLabel);
+        EditorGUILayout.LabelField(chips.Count > 0 ? Preview(chips) : "None: the stage shows the name alone.",
+            EditorStyles.wordWrappedMiniLabel);
+
+        string liftName = RobotModelCatalog.Highlights.LiftName(highlights.rigLift) ?? "Lift";
+        EditorGUI.BeginChangeCheck();
+        float drive = EditorGUILayout.DelayedFloatField(new GUIContent("Drivetrain watts",
+            "11 for each 11 W motor on the drivetrain, 5.5 for each 5.5 W one. 0 leaves its chip off."),
+            highlights.driveWatts);
+        float lift = EditorGUILayout.DelayedFloatField(new GUIContent($"{liftName} watts",
+            "The same, for the motors on the lift."), highlights.liftWatts);
+        var floating = (RobotModelCatalog.LabelSetting)EditorGUILayout.Popup("Floating Intake",
+            (int)highlights.floatingIntakeLabel, Choices(highlights.rigFloatingIntake));
+        var claw = (RobotModelCatalog.LabelSetting)EditorGUILayout.Popup("Claw",
+            (int)highlights.clawLabel, Choices(highlights.rigClaw));
+        var clamp = (RobotModelCatalog.LabelSetting)EditorGUILayout.Popup("Clamp",
+            (int)highlights.clampLabel, Choices(false));
+        if (EditorGUI.EndChangeCheck())
+        {
+            Undo.RecordObject(catalog, UndoName);
+            highlights.driveWatts = drive;
+            highlights.liftWatts = lift;
+            highlights.floatingIntakeLabel = floating;
+            highlights.clawLabel = claw;
+            highlights.clampLabel = clamp;
+            entry.highlights = highlights;
+            EditorUtility.SetDirty(catalog);
+            AssetDatabase.SaveAssetIfDirty(catalog);
+        }
+
+        RobotHighlightDetection.Motors motors = MotorsOf(entry);
+        EditorGUILayout.LabelField(motors.Watts > 0f
+                ? $"Motors in its CAD: {RobotModelCatalog.Highlights.FormatWatts(motors.Watts)} " +
+                  $"({motors.elevenWatt} × 11 W, {motors.fiveWatt} × 5.5 W)"
+                : "Its CAD names no motor by wattage, so the watts can't be checked.",
+            EditorStyles.miniLabel);
+        string problem = RobotHighlightDetection.WattsProblem(highlights, motors);
+        if (problem != null) EditorGUILayout.HelpBox(problem, MessageType.Warning);
+    }
+
+    // A label's three settings. The first says what the robot's rig said at the last Build Home Screen.
+    private static string[] Choices(bool fromRobot) =>
+        new[] { fromRobot ? "From the robot (shown)" : "From the robot (not shown)", "Always", "Never" };
+
+    private static string Preview(List<RobotModelCatalog.Highlights.Chip> chips)
+    {
+        var parts = new List<string>(chips.Count);
+        foreach (RobotModelCatalog.Highlights.Chip chip in chips)
+            parts.Add(chip.Text());
+        return string.Join("  ·  ", parts);
+    }
+
+    private RobotHighlightDetection.Motors MotorsOf(RobotModelCatalog.Entry entry)
+    {
+        string key = entry.id ?? string.Empty;
+        if (!motorCounts.TryGetValue(key, out RobotHighlightDetection.Motors motors))
+        {
+            motors = RobotHighlightDetection.CountMotors(BuildRobotBundles.SourcePrefab(entry));
+            motorCounts[key] = motors;
+        }
+        return motors;
     }
 
     // Publishes this machine's current layout for the robot as the shipped default.

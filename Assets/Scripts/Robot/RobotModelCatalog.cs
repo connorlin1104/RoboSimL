@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 
 // Catalog of the robot models the player can choose from on the home screen.
@@ -24,6 +25,115 @@ public class RobotModelCatalog : ScriptableObject
         public string id;
         public string displayName;
         public string type; // RobotMechanisms.TypeMotor or RobotMechanisms.TypePneumatic
+    }
+
+    // The kind of lift the home stage names on a robot's chip. Worked out from the rig — see Highlights.
+    //
+    // Serialized as a number, here and in the published index a phone reads, so members may be APPENDED
+    // but never renumbered or reordered.
+    public enum LiftKind
+    {
+        None = 0,
+        Cascade = 1,
+        DR4B = 2,
+    }
+
+    // Whether one of the home stage's labels shows: as the robot's rig says, or forced either way for a
+    // robot the rule reads wrong. Serialized as a number, like LiftKind.
+    public enum LabelSetting
+    {
+        FromRobot = 0,
+        Always = 1,
+        Never = 2,
+    }
+
+    // What the chips under a robot's name on the home stage say: the watts its drivetrain and its lift use,
+    // and a label for each mechanism worth naming — the lift, a Floating Intake, a claw, a clamp. Nothing
+    // else a robot has (toggles, an arm, a doinker) gets a chip; Configure Controller lists all of them.
+    //
+    // Three kinds of field, and which one writes what is the point:
+    //   - the WATTS are typed, in Tools > RoboSim > Robot > Model Catalog. The CAD names every motor by its
+    //     wattage, so a robot's total is knowable, but the motors are bolted to the chassis and geared out
+    //     to where they work, so which mechanism uses which is not. Model Catalog and Validate Home Stage
+    //     check the typed numbers against the CAD's total.
+    //   - the `rig` fields are WORKED OUT from the robot, by Build Home Screen and Build Robot Bundles
+    //     (RobotHighlightDetection). Never typed: a typed copy of what the rig already says goes stale the
+    //     first time the robot is rebuilt.
+    //   - the LABEL settings override the rig, for a robot the rule gets wrong.
+    //
+    // Plain data with no references, so a downloaded robot's copy travels in the published index as is.
+    [Serializable]
+    public class Highlights
+    {
+        [Tooltip("Watts of V5 motor on the drivetrain — 11 for each 11 W motor, 5.5 for each 5.5 W one. " +
+                 "0 leaves the drivetrain chip off.")]
+        public float driveWatts;
+        [Tooltip("Watts of V5 motor on the lift, shown on the lift's chip. 0 shows the lift's name alone.")]
+        public float liftWatts;
+
+        [Tooltip("Worked out from the robot by Build Home Screen: the lift Build Cascade Lift or Build DR4B " +
+                 "Lift made. Not typed.")]
+        public LiftKind rigLift;
+        [Tooltip("Worked out from the robot by Build Home Screen: an intake whose mouth sits at the floor. " +
+                 "Not typed.")]
+        public bool rigFloatingIntake;
+        [Tooltip("Worked out from the robot by Build Home Screen: a Build Claw claw with jaws. Not typed.")]
+        public bool rigClaw;
+
+        public LabelSetting floatingIntakeLabel;
+        public LabelSetting clawLabel;
+        // No rig field to go with this one: nothing rigs a clamp yet. When the clamp mechanism exists, its
+        // builder will mark the robot the way Build Claw does, and a rigClamp joins the three above.
+        public LabelSetting clampLabel;
+
+        public bool ShowsFloatingIntake => Shows(floatingIntakeLabel, rigFloatingIntake);
+        public bool ShowsClaw => Shows(clawLabel, rigClaw);
+        public bool ShowsClamp => Shows(clampLabel, false);
+
+        private static bool Shows(LabelSetting setting, bool fromRobot) =>
+            setting == LabelSetting.Always || (setting == LabelSetting.FromRobot && fromRobot);
+
+        // One chip: its label, and the watts beside it — 0 for a chip that has none.
+        public struct Chip
+        {
+            public string label;
+            public float watts;
+
+            // What the chip says, the watts first: "44 W Drive", or just "Claw". The stage colours the watts, so
+            // it passes the tags to wrap them in; the Model Catalog's preview passes none.
+            public string Text(string openTag = "", string closeTag = "") =>
+                watts > 0f ? $"{openTag}{FormatWatts(watts)}{closeTag} {label}" : label;
+        }
+
+        // The chips in the order the stage shows them: the drivetrain, the lift, then the labels. Five at the
+        // most, which is how many slots Build Home Screen makes.
+        public List<Chip> Chips()
+        {
+            var chips = new List<Chip>();
+            if (driveWatts > 0f) chips.Add(new Chip { label = "Drive", watts = driveWatts });
+
+            // A lift the rig can't name — one no lift builder made — still gets its typed watts shown, under
+            // the plain word.
+            string lift = LiftName(rigLift) ?? (liftWatts > 0f ? "Lift" : null);
+            if (lift != null) chips.Add(new Chip { label = lift, watts = Mathf.Max(0f, liftWatts) });
+
+            if (ShowsFloatingIntake) chips.Add(new Chip { label = "Floating Intake" });
+            if (ShowsClaw) chips.Add(new Chip { label = "Claw" });
+            if (ShowsClamp) chips.Add(new Chip { label = "Clamp" });
+            return chips;
+        }
+
+        public static string LiftName(LiftKind kind) => kind switch
+        {
+            LiftKind.Cascade => "Cascade",
+            LiftKind.DR4B => "DR4B",
+            _ => null,
+        };
+
+        // "44 W", "5.5 W". Invariant, so a phone set to a comma-decimal language doesn't write "5,5 W" into
+        // an English screen.
+        public static string FormatWatts(float watts) =>
+            watts.ToString("0.#", CultureInfo.InvariantCulture) + " W";
     }
 
     // Who can see a model. Public is 0 on purpose: entries serialized before this field existed
@@ -114,6 +224,10 @@ public class RobotModelCatalog : ScriptableObject
         public BundleRef bundle = new BundleRef();
 
         public List<MechanismInfo> mechanisms = new List<MechanismInfo>();
+
+        [Tooltip("What the chips under this robot's name on the home stage say. Type the watts in Tools > " +
+                 "RoboSim > Robot > Model Catalog; the rest is worked out from the robot by Build Home Screen.")]
+        public Highlights highlights = new Highlights();
 
         [Tooltip("Public models are listed for everyone. Private models are hidden until someone " +
                  "enters this entry's owner code in Settings.")]

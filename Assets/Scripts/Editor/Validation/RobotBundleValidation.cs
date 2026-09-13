@@ -287,6 +287,15 @@ public static class RobotBundleValidation
             {
                 new RobotModelCatalog.MechanismInfo { id = "lift", displayName = "DR4B Lift", type = "motor" },
             },
+            highlights = new RobotModelCatalog.Highlights
+            {
+                driveWatts = 44f,
+                liftWatts = 5.5f,
+                rigLift = RobotModelCatalog.LiftKind.DR4B,
+                rigFloatingIntake = true,
+                rigClaw = true,
+                clampLabel = RobotModelCatalog.LabelSetting.Always,
+            },
         });
 
         var parsed = JsonUtility.FromJson<RobotCatalogIndex>(JsonUtility.ToJson(index));
@@ -306,6 +315,18 @@ public static class RobotBundleValidation
         checks.That(robot.mechanisms != null && robot.mechanisms.Count == 1
                     && robot.mechanisms[0].displayName == "DR4B Lift",
             "The mechanism list was lost, so the controller-config screen has nothing to bind.");
+        RobotModelCatalog.Highlights highlights = robot.highlights;
+        checks.That(highlights != null && highlights.driveWatts == 44f && highlights.liftWatts == 5.5f
+                    && highlights.rigLift == RobotModelCatalog.LiftKind.DR4B && highlights.rigFloatingIntake
+                    && highlights.rigClaw && highlights.clampLabel == RobotModelCatalog.LabelSetting.Always,
+            "The home stage's chips were lost, so a downloaded robot would show its name alone.");
+
+        // An index published before the chips existed has no such field. It has to read as robots with no
+        // chips — the name alone, which is what every robot showed then — rather than fail to parse.
+        var old = JsonUtility.FromJson<RobotCatalogIndex>("{\"robots\":[{\"id\":\"old\",\"displayName\":\"Old\"}]}");
+        checks.That(old != null && old.robots != null && old.robots.Count == 1
+                    && (old.robots[0].highlights == null || old.robots[0].highlights.Chips().Count == 0),
+            "An index from before the chips existed doesn't read as robots with no chips.");
 
         // The index must never carry an owner code. It doesn't need to — the file was only reachable
         // by computing its address from a code the device already holds — and writing one in would

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
+using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -11,8 +13,9 @@ using Object = UnityEngine.Object;
 
 // Checks for the home screen's robot stage: the parts of it nobody would notice breaking until it had shipped.
 //
-// The mechanism line, the turntable's maths and the selection event are checked headless. The strip is
-// run against the robot that carries NonSupportingLink. The baked showcases are checked as assets —
+// The caption's chips, the turntable's maths and the selection event are checked headless, and what the chips
+// say about the shipped robots against those robots' own rigs. The strip is run against the robot that
+// carries NonSupportingLink. The baked showcases are checked as assets —
 // nothing left on them that could wake, every part on the stage layer with no shadow work, the cull
 // keeping exactly the parts it should, and the robot inside the camera's view at every angle of the turn.
 // The built HomeScene is checked for the settings no structural check can see, above all the two cameras'
@@ -48,33 +51,29 @@ public static class HomeSceneValidation
     private static string Run()
     {
         int checks = 0;
-        checks += MechanismLine();
+        checks += Caption();
+        checks += RigHighlights(out string chips);
         checks += TurntableMaths();
         checks += SelectionEvent();
         checks += StripLeavesNothingThatWakes();
         checks += BuiltScene(out StageSettings stage);
         checks += BakedShowcases(stage, out string counts);
-        return $"{Title}: PASSED ({checks} checks). Showcase renderers: {counts}.";
+        return $"{Title}: PASSED ({checks} checks). Showcase renderers: {counts}. Chips: {chips}.";
     }
 
     // --- The caption ---
 
-    private static int MechanismLine()
+    private static int Caption()
     {
         int checks = 0;
+
+        // Configure Controller still names every mechanism, through this.
         void Pretty(string raw, string expected)
         {
             string actual = MechanismNames.Pretty(raw);
             ValidationUtil.Assert(actual == expected, $"MechanismNames.Pretty(\"{raw}\") gave \"{actual}\", expected \"{expected}\".");
             checks++;
         }
-        void Line(List<RobotModelCatalog.MechanismInfo> mechanisms, string expected)
-        {
-            string actual = MechanismNames.Line(mechanisms);
-            ValidationUtil.Assert(actual == expected, $"MechanismNames.Line gave \"{actual}\", expected \"{expected}\".");
-            checks++;
-        }
-
         Pretty("CascadeLift", "Cascade Lift");
         Pretty("LeftSideToggle", "Left Side Toggle");
         Pretty("PlasticClaw Flip", "Plastic Claw Flip"); // already half spaced: no double space
@@ -83,45 +82,143 @@ public static class HomeSceneValidation
         Pretty("Doinker", "Doinker");
         Pretty("   ", string.Empty);
 
-        // The shipped robots' real mechanism names.
-        Line(Mechanisms("CascadeLift", "GroundIntake", "ArmRotate", "ScoringIntake"),
-             "Cascade Lift, Ground Intake, Arm Rotate, Scoring Intake");
-        Line(Mechanisms("LeftSideToggle", "RightSideToggle", "ClawArmRotate", "CascadeLift", "PlasticClaw Flip", "PlasticClaw Clamp"),
-             "Left Side Toggle, Right Side Toggle, Claw Arm Rotate  +3");
-        Line(Mechanisms(), string.Empty);
-        Line(null, string.Empty);
-        // One name over budget on its own is still shown — "+1" alone would say nothing.
-        string long1 = new string('A', 70);
-        Line(Mechanisms(long1, "Second"), long1 + "  +1");
-
-        // And the live catalog: never "+0", never a name cut in half.
-        RobotModelCatalog catalog = RoboSimPaths.LoadRobotCatalog();
-        ValidationUtil.Assert(catalog != null, $"no RobotModelCatalog at {RoboSimPaths.RobotModelCatalog}.");
-        foreach (RobotModelCatalog.Entry entry in catalog.models)
+        // The chips: what each kind of robot shows, in the order the stage shows it.
+        void Chips(RobotModelCatalog.Highlights highlights, string expected, string what)
         {
-            if (entry == null) continue;
-            string line = MechanismNames.Line(entry.mechanisms);
-            ValidationUtil.Assert(!line.Contains("+0"), $"'{entry.displayName}': the mechanism line says \"+0\".");
-            var whole = new HashSet<string>();
-            foreach (RobotModelCatalog.MechanismInfo m in entry.mechanisms)
-                if (m != null) whole.Add(MechanismNames.Pretty(string.IsNullOrWhiteSpace(m.displayName) ? m.id : m.displayName));
-            int plus = line.IndexOf("  +", StringComparison.Ordinal);
-            string names = plus >= 0 ? line.Substring(0, plus) : line;
-            if (names.Length > 0)
-            {
-                foreach (string shown in names.Split(new[] { ", " }, StringSplitOptions.None))
-                    ValidationUtil.Assert(whole.Contains(shown), $"'{entry.displayName}': the mechanism line cut a name: \"{shown}\".");
-            }
-            checks += 2;
+            string actual = Describe(highlights.Chips());
+            ValidationUtil.Assert(actual == expected, $"{what}: the chips read \"{actual}\", expected \"{expected}\".");
+            checks++;
         }
-        return checks;
+        Chips(new RobotModelCatalog.Highlights { driveWatts = 66f },
+              "66 W Drive", "a drivetrain and nothing else");
+        Chips(new RobotModelCatalog.Highlights { driveWatts = 44f, liftWatts = 22f, rigLift = RobotModelCatalog.LiftKind.DR4B, rigFloatingIntake = true },
+              "44 W Drive | 22 W DR4B | Floating Intake", "a DR4B robot with a floor intake");
+        Chips(new RobotModelCatalog.Highlights { driveWatts = 44f, liftWatts = 22f, rigLift = RobotModelCatalog.LiftKind.Cascade, rigClaw = true },
+              "44 W Drive | 22 W Cascade | Claw", "a cascade robot with a claw");
+        Chips(new RobotModelCatalog.Highlights(),
+              string.Empty, "a robot with nothing typed and nothing rigged, whose row hides");
+        Chips(new RobotModelCatalog.Highlights { rigLift = RobotModelCatalog.LiftKind.Cascade },
+              "Cascade", "a lift with no watts typed, named without a number");
+        Chips(new RobotModelCatalog.Highlights { liftWatts = 22f },
+              "22 W Lift", "watts typed for a lift no builder made");
+        Chips(new RobotModelCatalog.Highlights { driveWatts = 5.5f, liftWatts = 16.5f, rigLift = RobotModelCatalog.LiftKind.DR4B },
+              "5.5 W Drive | 16.5 W DR4B", "half-motor watts, which keep their decimal");
+        // Each setting against what the rig says: Never hides a label the rig shows, Always shows one it doesn't.
+        Chips(new RobotModelCatalog.Highlights { rigClaw = true, clawLabel = RobotModelCatalog.LabelSetting.Never },
+              string.Empty, "a claw the rig found, set to Never");
+        Chips(new RobotModelCatalog.Highlights { floatingIntakeLabel = RobotModelCatalog.LabelSetting.Always },
+              "Floating Intake", "an intake the rig didn't find, set to Always");
+        Chips(new RobotModelCatalog.Highlights { clampLabel = RobotModelCatalog.LabelSetting.Always },
+              "Clamp", "a clamp, which only its setting can show until something rigs one");
+        Chips(Widest(), "82.5 W Drive | 82.5 W Cascade | Floating Intake | Claw | Clamp", "every chip at once");
+
+        // The colour goes on the watts and nothing else. Describe takes the tags out, so this is the one check that
+        // sees them.
+        var accent = new Color32(0x0E, 0xA5, 0xE9, 0xFF);
+        string tinted = RobotStageView.ChipText(new RobotModelCatalog.Highlights.Chip { label = "Drive", watts = 44f }, accent);
+        ValidationUtil.Assert(tinted == "<color=#0EA5E9>44 W</color> Drive",
+            $"the stage writes a 44 W drivetrain chip as \"{tinted}\"; the watts should lead, in the accent colour, and the label follow.");
+        checks++;
+
+        int most = Widest().Chips().Count;
+        ValidationUtil.Assert(most <= BuildHomeScene.StageChipSlots,
+            $"a robot can show {most} chips, but the stage has {BuildHomeScene.StageChipSlots} slots — the rest would be dropped.");
+        return checks + 1;
     }
 
-    private static List<RobotModelCatalog.MechanismInfo> Mechanisms(params string[] names)
+    // Every chip at once, each carrying the widest watts a chip can: two digits and a half. No robot has all of
+    // it — the two numbers alone come to more than the 88 W of motors 654V v3 carries. It is the row the stage
+    // has to have room for.
+    private static RobotModelCatalog.Highlights Widest() => new RobotModelCatalog.Highlights
     {
-        var list = new List<RobotModelCatalog.MechanismInfo>();
-        foreach (string name in names) list.Add(new RobotModelCatalog.MechanismInfo { id = name, displayName = name });
-        return list;
+        driveWatts = 82.5f,
+        liftWatts = 82.5f,
+        rigLift = RobotModelCatalog.LiftKind.Cascade,
+        rigFloatingIntake = true,
+        rigClaw = true,
+        clampLabel = RobotModelCatalog.LabelSetting.Always,
+    };
+
+    // The chips as a player reads them: what the stage writes into each label, with the colour tags taken out.
+    private static string Describe(List<RobotModelCatalog.Highlights.Chip> chips)
+    {
+        var parts = new List<string>(chips.Count);
+        foreach (RobotModelCatalog.Highlights.Chip chip in chips)
+            parts.Add(Regex.Replace(RobotStageView.ChipText(chip, Color.white), "<[^>]*>", string.Empty));
+        return string.Join(" | ", parts);
+    }
+
+    // --- What the shipped robots' rigs say ---
+
+    private struct Expected
+    {
+        public RobotModelCatalog.LiftKind lift;
+        public bool claw;
+        public int intakes;
+        public int floorIntakes;
+        public int elevenWatt;
+        public int fiveWatt;
+    }
+
+    // Measured separately — straight off the prefab files, not through RobotHighlightDetection — so a regression
+    // in the detection shows up here as a robot with the wrong label or the wrong motor count. A robot re-rigged
+    // on purpose needs its line updated.
+    private static readonly Dictionary<string, Expected> ShippedRobots = new Dictionary<string, Expected>
+    {
+        // A drivetrain alone: six 11 W motors.
+        ["360rpm-drivetrain"] = new Expected { lift = RobotModelCatalog.LiftKind.None, elevenWatt = 6 },
+        // Its one intake rides the DR4B down to 0.09 below the wheels' centres.
+        ["654v-v1"] = new Expected { lift = RobotModelCatalog.LiftKind.DR4B, intakes = 1, floorIntakes = 1, elevenWatt = 6, fiveWatt = 2 },
+        // A claw, and no intake at all.
+        ["654v-v2"] = new Expected { lift = RobotModelCatalog.LiftKind.Cascade, claw = true, elevenWatt = 6, fiveWatt = 4 },
+        // The robot the floor rule exists for: one intake level with its wheels, and a scoring intake 1.17 units
+        // above them that must NOT count.
+        ["ryan-cascaderobot"] = new Expected { lift = RobotModelCatalog.LiftKind.Cascade, intakes = 2, floorIntakes = 1, elevenWatt = 7, fiveWatt = 2 },
+    };
+
+    private static int RigHighlights(out string summary)
+    {
+        RobotModelCatalog catalog = RoboSimPaths.LoadRobotCatalog();
+        ValidationUtil.Assert(catalog != null, $"no RobotModelCatalog at {RoboSimPaths.RobotModelCatalog}.");
+
+        int checks = 0, shipped = 0;
+        var lines = new List<string>();
+        foreach (RobotModelCatalog.Entry entry in catalog.models)
+        {
+            if (entry == null || entry.prefab == null) continue;
+            string who = $"'{entry.displayName}'";
+            RobotHighlightDetection.Rig rig = RobotHighlightDetection.Detect(entry.prefab);
+            RobotHighlightDetection.Motors motors = RobotHighlightDetection.CountMotors(entry.prefab);
+
+            if (ShippedRobots.TryGetValue(entry.id, out Expected expected))
+            {
+                ValidationUtil.Assert(rig.lift == expected.lift, $"{who}'s lift reads as {rig.lift}; it has a {expected.lift}.");
+                ValidationUtil.Assert(rig.claw == expected.claw,
+                    expected.claw ? $"{who}'s claw wasn't found." : $"{who} reads as having a claw, and it has none.");
+                ValidationUtil.Assert(rig.intakes == expected.intakes && rig.floorIntakes == expected.floorIntakes,
+                    $"{rig.floorIntakes} of {who}'s {rig.intakes} intake(s) read as at the floor; it has {expected.floorIntakes} of {expected.intakes}.");
+                ValidationUtil.Assert(motors.elevenWatt == expected.elevenWatt && motors.fiveWatt == expected.fiveWatt,
+                    $"{who}'s CAD counts as {motors.elevenWatt} x 11 W and {motors.fiveWatt} x 5.5 W; it has " +
+                    $"{expected.elevenWatt} and {expected.fiveWatt}.");
+                shipped++;
+                checks += 4;
+            }
+
+            // What the catalog carries is what the rig says NOW — or the stage goes on showing a robot's old labels.
+            RobotModelCatalog.Highlights highlights = entry.highlights;
+            ValidationUtil.Assert(highlights != null && highlights.rigLift == rig.lift &&
+                                  highlights.rigFloatingIntake == rig.floatingIntake && highlights.rigClaw == rig.claw,
+                $"{who}'s chips are out of date with its robot. Run Build Home Screen.");
+            string problem = RobotHighlightDetection.WattsProblem(highlights, motors);
+            ValidationUtil.Assert(problem == null, $"{who}: {problem} (Tools > RoboSim > Robot > Model Catalog.)");
+            checks += 2;
+            lines.Add($"{entry.displayName} [{Describe(highlights.Chips())}]");
+        }
+        // Found by id, so a renamed id would otherwise skip every check that matters without a word.
+        ValidationUtil.Assert(shipped == ShippedRobots.Count,
+            $"only {shipped} of the {ShippedRobots.Count} shipped robots were found in the catalog by id.");
+        summary = string.Join(", ", lines);
+        return checks + 1;
     }
 
     // --- The turntable ---
@@ -390,6 +487,27 @@ public static class HomeSceneValidation
         ValidationUtil.Assert(!image.enabled, "the robot's window must be saved switched off: with no texture yet it would draw a white box.");
         checks += 2;
 
+        // The chips: every slot wired and saved switched off (the view turns on as many as the robot has), and
+        // room for the widest row a robot can have — measured with the chip labels' own font, so a bigger size
+        // or a longer label fails here, on both screen shapes below, rather than on an iPad.
+        SerializedObject viewSo = new SerializedObject(view);
+        var chipRow = viewSo.FindProperty("chipRow").objectReferenceValue as GameObject;
+        SerializedProperty slots = viewSo.FindProperty("chipLabels");
+        ValidationUtil.Assert(chipRow != null && slots != null && slots.arraySize == BuildHomeScene.StageChipSlots,
+            $"the stage view needs its chip row and {BuildHomeScene.StageChipSlots} chip labels.");
+        TMP_Text chipLabel = null;
+        for (int i = 0; i < slots.arraySize; i++)
+        {
+            var label = slots.GetArrayElementAtIndex(i).objectReferenceValue as TMP_Text;
+            ValidationUtil.Assert(label != null && label.transform.parent != null && label.transform.parent.parent == chipRow.transform,
+                $"chip slot {i + 1} is not a label inside a chip in the chip row.");
+            ValidationUtil.Assert(!label.transform.parent.gameObject.activeSelf, $"chip {i + 1} must be saved switched off.");
+            if (chipLabel == null) chipLabel = label;
+        }
+        float widestRow = WidestRowWidth(chipLabel, viewSo.FindProperty("wattsColor").colorValue,
+            chipRow.GetComponent<HorizontalLayoutGroup>(), chipLabel.transform.parent.GetComponent<HorizontalLayoutGroup>());
+        checks += 1 + slots.arraySize * 2;
+
         // Layout, worked out from the saved anchors at both screen shapes: the window sits inside the stage,
         // clear of the title above it and the caption below it.
         RectTransform homeStage = BuildHomeScene.FindDescendantRect(scene, "HomeStage");
@@ -421,8 +539,10 @@ public static class HomeSceneValidation
             ValidationUtil.Assert(Inside(window, stage) && Inside(band, stage), $"the robot's window or caption leaves the stage {where}.");
             ValidationUtil.Assert(window.yMin >= band.yMax - 0.5f, $"the robot's window overlaps its caption {where}.");
             ValidationUtil.Assert(window.yMax <= titleBand.yMin + 0.5f, $"the robot's window runs up under the title {where}.");
+            ValidationUtil.Assert(widestRow <= band.width,
+                $"the widest row of chips ({widestRow:F0} units) is wider than the caption ({band.width:F0}) {where}.");
             settings.viewAspects[i] = window.width / window.height;
-            checks += 4;
+            checks += 5;
         }
         return checks;
     }
@@ -513,6 +633,45 @@ public static class HomeSceneValidation
     // cylinder was measured from.
     private static bool InView(List<Vector3> points, Vector3 pivot, float yaw, float distance, float fov, float aspect, float pitch, float slack) =>
         InView(points, pivot, yaw, distance * slack, fov, aspect, pitch);
+
+    // How wide the widest row of chips lays out: each chip is its label plus its padding, with the row's spacing
+    // between. The labels are measured by a copy of a real one — same font, size and style — in a scene of its
+    // own: a label saved switched off has never been set up to measure anything, and switching one on would
+    // leave HomeScene marked as changed.
+    private static float WidestRowWidth(TMP_Text model, Color wattsColor, HorizontalLayoutGroup row, HorizontalLayoutGroup chip)
+    {
+        ValidationUtil.Assert(row != null && chip != null, "the chip row and each chip must lay themselves out with a HorizontalLayoutGroup.");
+        List<RobotModelCatalog.Highlights.Chip> chips = Widest().Chips();
+        Scene preview = EditorSceneManager.NewPreviewScene();
+        try
+        {
+            var probeObject = new GameObject("ChipProbe", typeof(RectTransform));
+            SceneManager.MoveGameObjectToScene(probeObject, preview);
+            TextMeshProUGUI probe = probeObject.AddComponent<TextMeshProUGUI>();
+            probe.font = model.font;
+            probe.fontSize = model.fontSize;
+            probe.fontStyle = model.fontStyle;
+            probe.characterSpacing = model.characterSpacing;
+            probe.textWrappingMode = TextWrappingModes.NoWrap;
+
+            float width = row.spacing * (chips.Count - 1);
+            int characters = 0;
+            foreach (RobotModelCatalog.Highlights.Chip c in chips)
+            {
+                width += chip.padding.horizontal + probe.GetPreferredValues(RobotStageView.ChipText(c, wattsColor)).x;
+                characters += c.label.Length + (c.watts > 0f ? 7 : 0);
+            }
+            // A measurement that came back empty would pass the fit on any screen. Text like this averages over
+            // half an em a character, so one under a third of an em is a measurement that isn't working.
+            ValidationUtil.Assert(width > characters * model.fontSize / 3f,
+                $"the chip labels measured {width:F0} units for {characters} characters — the measurement isn't working.");
+            return width;
+        }
+        finally
+        {
+            EditorSceneManager.ClosePreviewScene(preview);
+        }
+    }
 
     // --- Helpers ---
 

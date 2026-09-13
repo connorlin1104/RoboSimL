@@ -25,6 +25,15 @@ MonoBehaviour:
       remote: 0
       sourceGuid: 
     mechanisms: []
+    highlights:
+      driveWatts: 66
+      liftWatts: 0
+      rigLift: 0
+      rigFloatingIntake: 0
+      rigClaw: 0
+      floatingIntakeLabel: 0
+      clawLabel: 0
+      clampLabel: 0
     visibility: 0
     ownerCode: 
     ownerLabel: 
@@ -55,6 +64,15 @@ MonoBehaviour:
     - id: metalpart
       displayName: Doinker
       type: pneumatic
+    highlights:
+      driveWatts: 44
+      liftWatts: 22
+      rigLift: 2
+      rigFloatingIntake: 1
+      rigClaw: 0
+      floatingIntakeLabel: 0
+      clawLabel: 0
+      clampLabel: 0
     visibility: 1
     ownerCode: 654V-1104
     ownerLabel: 
@@ -109,6 +127,15 @@ MonoBehaviour:
     - id: claw-polycarb-left-side-claw-v1-1
       displayName: PlasticClaw Clamp
       type: pneumatic
+    highlights:
+      driveWatts: 44
+      liftWatts: 22
+      rigLift: 1
+      rigFloatingIntake: 0
+      rigClaw: 1
+      floatingIntakeLabel: 0
+      clawLabel: 0
+      clampLabel: 0
     visibility: 0
     ownerCode: 
     ownerLabel: 
@@ -171,6 +198,15 @@ MonoBehaviour:
     - id: scoringmech
       displayName: ScoringIntake
       type: motor
+    highlights:
+      driveWatts: 44
+      liftWatts: 22
+      rigLift: 1
+      rigFloatingIntake: 1
+      rigClaw: 0
+      floatingIntakeLabel: 0
+      clawLabel: 0
+      clampLabel: 0
     visibility: 0
     ownerCode: 
     ownerLabel: 

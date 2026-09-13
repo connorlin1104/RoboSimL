@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -34,7 +35,12 @@ public class RobotStageView : MonoBehaviour,
     [Tooltip("Shown instead of the robot when there is none to draw — the app's chassis mark.")]
     [SerializeField] private GameObject fallbackMark;
     [SerializeField] private TMP_Text nameLabel;
-    [SerializeField] private TMP_Text mechanismsLabel;
+    [Tooltip("The row of chips under the name. Hidden whole for a robot with none, so the name centres.")]
+    [SerializeField] private GameObject chipRow;
+    [Tooltip("One label per chip slot, in order; each chip is its label's parent.")]
+    [SerializeField] private TMP_Text[] chipLabels;
+    [Tooltip("The watts on a chip. Written from the theme by Build Home Screen.")]
+    [SerializeField] private Color wattsColor = new Color32(0x0E, 0xA5, 0xE9, 0xFF);
 
     [Header("Cadence")]
     public StageMode mode = StageMode.Drift;
@@ -130,13 +136,29 @@ public class RobotStageView : MonoBehaviour,
     private void ShowCaption(RobotModelCatalog.Entry entry)
     {
         if (nameLabel != null) nameLabel.text = entry != null ? entry.displayName : string.Empty;
-        if (mechanismsLabel == null) return;
-        string line = entry != null ? MechanismNames.Line(entry.mechanisms) : string.Empty;
-        mechanismsLabel.text = line;
-        // Hidden rather than left blank, so the caption's layout centres the name in the band instead of
-        // leaving it perched over an empty line.
-        mechanismsLabel.gameObject.SetActive(line.Length > 0);
+        if (chipRow == null || chipLabels == null) return;
+
+        List<RobotModelCatalog.Highlights.Chip> chips = entry != null && entry.highlights != null
+            ? entry.highlights.Chips()
+            : new List<RobotModelCatalog.Highlights.Chip>();
+        for (int i = 0; i < chipLabels.Length; i++)
+        {
+            TMP_Text label = chipLabels[i];
+            if (label == null) continue;
+            bool used = i < chips.Count;
+            if (used) label.text = ChipText(chips[i], wattsColor);
+            label.transform.parent.gameObject.SetActive(used);
+        }
+        // Hidden rather than left empty, so the caption's layout centres the name in the band instead of
+        // leaving it perched over an empty row.
+        chipRow.SetActive(chips.Count > 0);
     }
+
+    // A chip's text: its watts, when it has any, first and in the accent colour, then the label in the caption's
+    // white — "44 W Drive". Public for Validate Home Stage, which reads the chips through it and measures the
+    // widest row with the chips' own font.
+    public static string ChipText(RobotModelCatalog.Highlights.Chip chip, Color wattsColor) =>
+        chip.Text($"<color=#{ColorUtility.ToHtmlStringRGB(wattsColor)}>", "</color>");
 
     void LateUpdate()
     {
