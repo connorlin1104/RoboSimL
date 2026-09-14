@@ -515,3 +515,51 @@ public static class PerformanceStatsSettings
         set => SettingsPrefs.SetBool(ShowPrefKey, value);
     }
 }
+
+// What the home screen does with the selected robot (RobotStageView.StageMode): Drift turns it slowly and lets a finger
+// spin it, Still shows it without moving, Off shows the app's chassis mark instead and draws no robot at all. Settings >
+// Robot > Performance, under the performance switch, because what the turning robot costs is the first thing that
+// readout measures, and Off is the cheapest home screen there is. Stored by NAME, so reordering the enum can't turn an old
+// choice into a different one; anything unreadable is Drift.
+public static class HomeStageSettings
+{
+    public const string ModePrefKey = "HomeStageMode";
+    public const RobotStageView.StageMode DefaultMode = RobotStageView.StageMode.Drift;
+
+    public static RobotStageView.StageMode Mode
+    {
+        get => Parse(PlayerPrefs.GetString(ModePrefKey, string.Empty));
+        set
+        {
+            PlayerPrefs.SetString(ModePrefKey, value.ToString());
+            PlayerPrefs.Save(); // flush now so a force-quit doesn't lose the choice
+        }
+    }
+
+    // A stored name back to its mode, by exact name: Enum.TryParse would also take "1", "drift" or "Drift, Off".
+    public static RobotStageView.StageMode Parse(string stored)
+    {
+        foreach (RobotStageView.StageMode mode in Enum.GetValues(typeof(RobotStageView.StageMode)))
+            if (mode.ToString() == stored) return mode;
+        return DefaultMode;
+    }
+
+    // Drift, Still, Off and round again: the button in Settings steps through them.
+    public static RobotStageView.StageMode Next(RobotStageView.StageMode mode) => mode switch
+    {
+        RobotStageView.StageMode.Drift => RobotStageView.StageMode.Still,
+        RobotStageView.StageMode.Still => RobotStageView.StageMode.Off,
+        _ => RobotStageView.StageMode.Drift,
+    };
+
+    // What the button says.
+    public static string ButtonText(RobotStageView.StageMode mode) => "Home Screen Robot:  " + DisplayName(mode);
+
+    // "Turning" rather than the code's "Drift", a word that means something else to a driver.
+    public static string DisplayName(RobotStageView.StageMode mode) => mode switch
+    {
+        RobotStageView.StageMode.Drift => "Turning",
+        RobotStageView.StageMode.Still => "Still",
+        _ => "Off",
+    };
+}

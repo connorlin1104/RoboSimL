@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -36,16 +37,17 @@ public class PerfOverlay : MonoBehaviour
     public const string HomeSceneName = "HomeScene";
 
     // Where the panel sits, in canvas units: the same 1920x1080, match-0.5 canvas every screen here uses, so these line
-    // up with BuildDriveControls' numbers. The home screen's top-left corner is empty. On a field that corner holds L1
-    // and L2 — 40 in from the corner, two 72-unit buttons 20 apart — so there the panel starts under them.
+    // up with BuildDriveControls' and BuildHomeScene's numbers. A thin column in the home screen's top-left corner, 40 in
+    // from both edges. In a game that corner holds L1 and L2 (40 in, two 72-unit buttons 20 apart, ending 204 down), so
+    // there it steps straight down under them. It is thin because of the home title, which slides into the corner's row
+    // as Settings opens: on a 4:3 iPad, the narrowest screen, its first letter stops about 232 in, and the panel ends at
+    // 200. Validate Performance Overlay works both out from the scenes.
     public static readonly Vector2 HomePosition = new Vector2(40f, -40f);
     public static readonly Vector2 FieldPosition = new Vector2(40f, -228f);
-    public const float PanelWidth = 560f;
+    public const float PanelWidth = 160f;
 
-    private const float FontSize = 24f;
-    private const float Padding = 14f;
-    private const float ButtonWidth = 240f;
-    private const float ButtonHeight = 56f;
+    private const float FontSize = 22f;
+    private const float Padding = 10f;
     private const int UiLayer = 5;
     // Above everything the app draws: the loading overlay, the sub-screens, a field's controls.
     private const int SortingOrder = 32767;
@@ -58,9 +60,11 @@ public class PerfOverlay : MonoBehaviour
     private const DeviceStats.Thermal NoHeatYet = (DeviceStats.Thermal)(-2);
     private const int NoLowPowerYet = -2;
 
-    private static readonly Color PanelColor = new Color32(0x0B, 0x14, 0x2E, 0xD9);
+    // 60% navy, so what's behind shows through; at 85% it sat on the field as a black box. The worst case for the text is
+    // the field's light tiles: this project blends UI in linear light, where a see-through dark panel comes out lighter
+    // than the same alpha looks in an image editor.
+    private static readonly Color PanelColor = new Color32(0x0B, 0x14, 0x2E, 0x99);
     private static readonly Color TextColor = new Color32(0xE8, 0xEE, 0xFB, 0xFF);
-    private static readonly Color ButtonColor = new Color32(0x0E, 0xA5, 0xE9, 0xFF);
 
     private static PerfOverlay instance;
     // Unity's clock plus this is the time since the process started, which is when the player tapped the icon. Unity's
@@ -73,9 +77,8 @@ public class PerfOverlay : MonoBehaviour
     {
         public Canvas canvas;
         public RectTransform panel;
-        public TextMeshProUGUI readout;
-        public Button stageButton;
-        public TextMeshProUGUI stageLabel;
+        public TextMeshProUGUI labels;   // the left column: what each row is
+        public TextMeshProUGUI values;   // the right column, right-aligned so the numbers line up
     }
 
     // Everything the panel prints, so the text can be made — and checked against the font — without a running app.
@@ -85,8 +88,19 @@ public class PerfOverlay : MonoBehaviour
         public bool frameTiming;
         public DeviceStats.Thermal heat;
         public int lowPower;
-        public double footprintMb, headroomMb;
-        public string launchLine, loadLine, logName, logError;
+        public double footprintMb;
+    }
+
+    // One row of the panel: what it is on the left, its value on the right.
+    public struct Row
+    {
+        public string label, value;
+
+        public Row(string label, string value)
+        {
+            this.label = label;
+            this.value = value;
+        }
     }
 
     private Parts parts;
@@ -94,8 +108,6 @@ public class PerfOverlay : MonoBehaviour
     private readonly FrameTiming[] timings = new FrameTiming[1];
     private bool frameTiming;
     private StreamWriter writer;
-    private string logName = string.Empty;
-    private string logError = string.Empty;
     private bool sessionWritten;
     private bool startedAtLaunch;
     private bool quitting;
@@ -112,7 +124,6 @@ public class PerfOverlay : MonoBehaviour
     private double launchWindowEnd = -1;
     private bool launchWritten;
     private double loadRequestedAt = -1;
-    private string loadLine = string.Empty;
     private DeviceStats.Thermal lastHeat = NoHeatYet;
     private int lastLowPower = NoLowPowerYet;
 
@@ -167,7 +178,6 @@ public class PerfOverlay : MonoBehaviour
     {
         startedAtLaunch = atLaunch;
         parts = BuildUi(transform);
-        parts.stageButton.onClick.AddListener(CycleStageMode);
         frameTiming = FrameTimingManager.IsFeatureEnabled();
         nextTick = Time.realtimeSinceStartupAsDouble + TickSeconds;
         OpenLog();
@@ -271,8 +281,8 @@ public class PerfOverlay : MonoBehaviour
     {
         sceneName = scene.name;
         parts.panel.anchoredPosition = sceneName == HomeSceneName ? HomePosition : FieldPosition;
+        // For the log's stage column. Settings > Robot > Performance is where the stage is switched.
         stageView = FindAnyObjectByType<RobotStageView>(FindObjectsInactive.Include);
-        RefreshStageButton();
         Layout();
     }
 
@@ -282,14 +292,8 @@ public class PerfOverlay : MonoBehaviour
         var detail = new StringBuilder("scene=").Append(scene);
         if (loadRequestedAt >= 0)
         {
-            double seconds = now - loadRequestedAt;
-            detail.Append(" load_s=").Append(Fmt(seconds, "0.000"));
-            loadLine = FormatLoad(scene, seconds);
+            detail.Append(" load_s=").Append(Fmt(now - loadRequestedAt, "0.000"));
             loadRequestedAt = -1;
-        }
-        else
-        {
-            loadLine = string.Empty;
         }
         if (startedAtLaunch && launchFirstFrame < 0)
         {
@@ -358,7 +362,7 @@ public class PerfOverlay : MonoBehaviour
             stage = StageName(),
         }));
 
-        parts.readout.text = FormatReadout(new Reading
+        List<Row> rows = ReadoutRows(new Reading
         {
             fps = window.Fps,
             worstFrameMs = window.WorstFrameMs,
@@ -368,43 +372,17 @@ public class PerfOverlay : MonoBehaviour
             heat = heat,
             lowPower = lowPower,
             footprintMb = footprint,
-            headroomMb = headroom,
-            launchLine = sceneName == HomeSceneName && startedAtLaunch && launchFirstFrame >= 0
-                ? FormatLaunch(launchFirstFrame, launchRobot, launchWorstMs, Now > launchWindowEnd)
-                : string.Empty,
-            loadLine = loadLine,
-            logName = logName,
-            logError = logError,
         });
-        RefreshStageButton();
+        parts.labels.text = Column(rows, values: false);
+        parts.values.text = Column(rows, values: true);
         Layout();
         window.Clear();
     }
 
     // --- The home stage ---
 
-    private void RefreshStageButton()
-    {
-        bool shown = stageView != null && stageView.isActiveAndEnabled;
-        if (parts.stageButton.gameObject.activeSelf != shown) parts.stageButton.gameObject.SetActive(shown);
-        if (shown) parts.stageLabel.text = StageButtonText(stageView.mode);
-    }
-
-    // Drift, Still, Off and round again. What the stage costs is the difference between the rows logged in each.
-    private void CycleStageMode()
-    {
-        if (stageView == null) return;
-        RobotStageView.StageMode next = stageView.mode switch
-        {
-            RobotStageView.StageMode.Drift => RobotStageView.StageMode.Still,
-            RobotStageView.StageMode.Still => RobotStageView.StageMode.Off,
-            _ => RobotStageView.StageMode.Drift,
-        };
-        stageView.SetMode(next);
-        Event("stage_mode", next.ToString());
-        RefreshStageButton();
-    }
-
+    // What the stage was doing that second, for the log's stage column. Settings > Robot > Performance switches it
+    // (HomeStageSettings) and reports each change through PerfLog.StageModeChanged.
     private string StageName()
     {
         if (stageView == null) return string.Empty;
@@ -415,11 +393,11 @@ public class PerfOverlay : MonoBehaviour
 
     private void Layout()
     {
-        float textHeight = Mathf.Ceil(parts.readout.preferredHeight);
-        parts.readout.rectTransform.sizeDelta = new Vector2(PanelWidth - Padding * 2f, textHeight);
-        float height = Padding * 2f + textHeight;
-        if (parts.stageButton.gameObject.activeSelf) height += Padding + ButtonHeight;
-        parts.panel.sizeDelta = new Vector2(PanelWidth, height);
+        float textHeight = Mathf.Ceil(Mathf.Max(parts.labels.preferredHeight, parts.values.preferredHeight));
+        var column = new Vector2(PanelWidth - Padding * 2f, textHeight);
+        parts.labels.rectTransform.sizeDelta = column;
+        parts.values.rectTransform.sizeDelta = column;
+        parts.panel.sizeDelta = new Vector2(PanelWidth, Padding * 2f + textHeight);
     }
 
     // The TextMesh Pro default, LiberationSans, whose digits are all one width — the numbers change every second and
@@ -439,7 +417,8 @@ public class PerfOverlay : MonoBehaviour
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
         scaler.matchWidthOrHeight = 0.5f;
-        go.AddComponent<GraphicRaycaster>();
+        // No GraphicRaycaster: nothing on this canvas can take a touch, so the panel never gets in the way of what it sits
+        // over — a field's controls, the home screen's robot, Settings.
 
         parts.panel = NewRect("PerfPanel", go.transform);
         parts.panel.anchorMin = parts.panel.anchorMax = parts.panel.pivot = new Vector2(0f, 1f);
@@ -447,34 +426,23 @@ public class PerfOverlay : MonoBehaviour
         parts.panel.sizeDelta = new Vector2(PanelWidth, 200f);
         Image background = parts.panel.gameObject.AddComponent<Image>();
         background.color = PanelColor;
-        // A touch on the panel goes through to whatever is under it. Only the stage button takes one.
         background.raycastTarget = false;
 
-        RectTransform text = NewRect("PerfReadout", parts.panel);
-        text.anchorMin = text.anchorMax = text.pivot = new Vector2(0f, 1f);
-        text.anchoredPosition = new Vector2(Padding, -Padding);
-        text.sizeDelta = new Vector2(PanelWidth - Padding * 2f, 150f);
-        parts.readout = NewText(text, TextAlignmentOptions.TopLeft);
-        parts.readout.text = "Measuring...";
-
-        RectTransform button = NewRect("PerfStageButton", parts.panel);
-        button.anchorMin = button.anchorMax = button.pivot = new Vector2(0f, 0f);
-        button.anchoredPosition = new Vector2(Padding, Padding);
-        button.sizeDelta = new Vector2(ButtonWidth, ButtonHeight);
-        Image buttonImage = button.gameObject.AddComponent<Image>();
-        buttonImage.color = ButtonColor;
-        parts.stageButton = button.gameObject.AddComponent<Button>();
-        parts.stageButton.targetGraphic = buttonImage;
-
-        RectTransform label = NewRect("PerfStageLabel", button);
-        label.anchorMin = Vector2.zero;
-        label.anchorMax = Vector2.one;
-        label.offsetMin = label.offsetMax = Vector2.zero;
-        parts.stageLabel = NewText(label, TextAlignmentOptions.Center);
-        parts.stageLabel.color = Color.white;
-        parts.stageLabel.text = StageButtonText(RobotStageView.StageMode.Drift);
-        button.gameObject.SetActive(false);
+        parts.labels = NewText(NewColumn("PerfLabels", parts.panel), TextAlignmentOptions.TopLeft);
+        parts.values = NewText(NewColumn("PerfValues", parts.panel), TextAlignmentOptions.TopRight);
+        parts.labels.text = "Measuring...";
+        parts.values.text = string.Empty;
         return parts;
+    }
+
+    // One of the panel's two columns. Both fill the same inset box; one text is aligned left and the other right.
+    private static RectTransform NewColumn(string name, RectTransform panel)
+    {
+        RectTransform rect = NewRect(name, panel);
+        rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(Padding, -Padding);
+        rect.sizeDelta = new Vector2(PanelWidth - Padding * 2f, 150f);
+        return rect;
     }
 
     private static RectTransform NewRect(string name, Transform parent)
@@ -500,44 +468,55 @@ public class PerfOverlay : MonoBehaviour
 
     // --- What it says ---
 
-    public static string StageButtonText(RobotStageView.StageMode mode) => "Stage: " + mode;
+    // A row a stat, short label left and value right, so it fits the thin column: how smoothly it runs, what a frame
+    // costs the CPU and the GPU, the worst frame of the second, how hot the phone is, the memory the app uses, and a Low
+    // Power row while that mode is on. The labels are short because the column is: a longer one would push the panel into
+    // the home title's way on an iPad. Everything else is in the log (2026-09-13).
+    public static List<Row> ReadoutRows(Reading r)
+    {
+        var rows = new List<Row>
+        {
+            new Row("FPS", Fmt(r.fps, "0")),
+            new Row("CPU", r.frameTiming ? Duration(r.cpuMainMs) : "off"),
+            new Row("GPU", r.frameTiming ? Duration(r.gpuMs) : "off"),
+            new Row("Worst", Duration(r.worstFrameMs)),
+            new Row("Heat", r.heat == DeviceStats.Thermal.Unknown ? "n/a" : HeatName(r.heat)),
+            new Row("RAM", r.footprintMb >= 0 ? Memory(r.footprintMb) : "n/a"),
+        };
+        if (r.lowPower == 1) rows.Add(new Row("Low Power", string.Empty));
+        return rows;
+    }
 
-    public static string FormatReadout(Reading r)
+    // One of the panel's columns: every row's label, or every row's value, a line each.
+    public static string Column(List<Row> rows, bool values)
     {
         var text = new StringBuilder();
-        text.Append(Fmt(r.fps, "0")).Append(" fps");
-        if (r.frameTiming)
-            text.Append("   CPU ").Append(Fmt(r.cpuMainMs, "0.0")).Append(" ms   GPU ").Append(Fmt(r.gpuMs, "0.0")).Append(" ms");
-        else
-            text.Append("   CPU and GPU: Frame Timing Stats is off");
-
-        text.Append('\n').Append("Slowest frame ").Append(Fmt(r.worstFrameMs, "0")).Append(" ms   Heat ")
-            .Append(r.heat == DeviceStats.Thermal.Unknown ? "n/a" : HeatName(r.heat));
-        if (r.lowPower == 1) text.Append("   Low Power Mode");
-
-        text.Append('\n');
-        if (r.footprintMb >= 0) text.Append("Memory ").Append(Fmt(r.footprintMb, "0")).Append(" MB");
-        else text.Append("Memory: measured on a phone only");
-        if (r.headroomMb >= 0) text.Append(", ").Append(Fmt(r.headroomMb, "0")).Append(" MB to spare");
-
-        if (!string.IsNullOrEmpty(r.launchLine)) text.Append('\n').Append(r.launchLine);
-        if (!string.IsNullOrEmpty(r.loadLine)) text.Append('\n').Append(r.loadLine);
-        text.Append('\n').Append(string.IsNullOrEmpty(r.logError)
-            ? "Recording " + Ascii(r.logName)
-            : "Not recording: " + Ascii(r.logError));
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (i > 0) text.Append('\n');
+            text.Append(values ? rows[i].value : rows[i].label);
+        }
         return text.ToString();
     }
 
-    public static string FormatLaunch(double firstFrame, double robot, double worstMs, bool windowClosed)
+    // A time never more than seven characters, so it always fits its column: 6.1 ms, 123 ms, 1.2 s, 123 s. The decimal
+    // goes at three digits, in every unit.
+    public static string Duration(double ms)
     {
-        var line = new StringBuilder("Launch ").Append(Fmt(firstFrame, "0.00")).Append(" s");
-        if (robot >= 0) line.Append("   robot ").Append(Fmt(robot, "0.00")).Append(" s");
-        if (windowClosed) line.Append("   slowest ").Append(Fmt(worstMs, "0")).Append(" ms");
-        return line.ToString();
+        if (double.IsNaN(ms) || double.IsInfinity(ms) || ms < 0) return "-";
+        if (ms < 99.95) return ms.ToString("0.0", CultureInfo.InvariantCulture) + " ms";
+        if (ms < 999.5) return ms.ToString("0", CultureInfo.InvariantCulture) + " ms";
+        double seconds = ms / 1000.0;
+        return seconds.ToString(seconds < 99.95 ? "0.0" : "0", CultureInfo.InvariantCulture) + " s";
     }
 
-    public static string FormatLoad(string scene, double seconds) =>
-        "Loaded " + Ascii(scene) + " in " + Fmt(seconds, "0.00") + " s";
+    // The same for memory: 412 MB, 1.4 GB, 121 GB.
+    public static string Memory(double mb)
+    {
+        if (mb < 999.5) return mb.ToString("0", CultureInfo.InvariantCulture) + " MB";
+        double gb = mb / 1024.0;
+        return gb.ToString(gb < 99.95 ? "0.0" : "0", CultureInfo.InvariantCulture) + " GB";
+    }
 
     public static string HeatName(DeviceStats.Thermal heat) =>
         heat == DeviceStats.Thermal.Unknown ? string.Empty : heat.ToString();
@@ -546,16 +525,6 @@ public class PerfOverlay : MonoBehaviour
         double.IsNaN(value) || double.IsInfinity(value) ? "-" : value.ToString(format, CultureInfo.InvariantCulture);
 
     private static double Megabytes(long bytes) => bytes < 0 ? -1 : bytes / (1024.0 * 1024.0);
-
-    // Anything outside the font's baked glyphs would draw as an empty box: an error message in the phone's own
-    // language, a file name with an accent in it.
-    public static string Ascii(string value)
-    {
-        if (string.IsNullOrEmpty(value)) return string.Empty;
-        var text = new StringBuilder(value.Length);
-        foreach (char c in value) text.Append(c >= ' ' && c <= '~' ? c : '?');
-        return text.ToString();
-    }
 
     // --- The file ---
 
@@ -569,14 +538,13 @@ public class PerfOverlay : MonoBehaviour
             string path = Path.Combine(folder, stem + ".csv");
             for (int n = 2; File.Exists(path); n++) path = Path.Combine(folder, $"{stem}-{n}.csv");
             writer = new StreamWriter(path, false, new UTF8Encoding(false));
-            logName = Path.GetFileName(path);
             writer.WriteLine(PerfCsv.Header());
             writer.Flush();
         }
         catch (Exception e)
         {
             CloseLog();
-            logError = e.Message;
+            Debug.LogWarning("[PerfOverlay] Not recording to a file: " + e.Message);
         }
     }
 
@@ -600,7 +568,7 @@ public class PerfOverlay : MonoBehaviour
         catch (Exception e)
         {
             CloseLog();
-            logError = e.Message;
+            Debug.LogWarning("[PerfOverlay] Not recording to a file: " + e.Message);
         }
     }
 

@@ -52,7 +52,7 @@ public class BuildHomeScene
     // A version stamp turns "did I remember to add a check for this?" — a judgement call that has
     // to be made correctly every time — into a one-line bump. It is also the ONLY thing that can
     // catch a change with no object footprint at all, which an added component is.
-    internal const string HomeSceneStamp = "HomeSceneStamp_v9";
+    internal const string HomeSceneStamp = "HomeSceneStamp_v10";
 
     // The theme, derived from the app icon (Assets/Icons/AppIcon.png) rather than invented.
     //
@@ -411,6 +411,7 @@ public class BuildHomeScene
                IsRefSet(so, "publicListViewport") && IsRefSet(so, "privateListViewport") &&
                IsRefSet(so, "automaticMatchloadToggle") && IsRefSet(so, "liteFieldToggle") &&
                IsRefSet(so, "reverseDriveToggle") && IsRefSet(so, "performanceStatsToggle") &&
+               IsRefSet(so, "homeStageButton") && IsRefSet(so, "stageView") &&
                IsRefSet(so, "robotCodeInput") && IsRefSet(so, "robotCodeStatusLabel") &&
                IsRefSet(so, "yourCodesLabel") &&
                IsRefSet(so, "submitRobot") && IsRefSet(so, "uploadConfig") &&
@@ -951,6 +952,13 @@ public class BuildHomeScene
             "Show Performance Stats", PerformanceStatsSettings.DefaultShow);
         SetLayoutHeight(performanceStatsToggle.gameObject, 64f);
 
+        // The home screen's robot: Turning, Still or Off (persisted via HomeStageSettings, put on the stage at once). Under
+        // the performance switch because what the turning robot costs is the first thing the readout measures. Until
+        // 2026-09-13 this was a button on the readout itself.
+        Button homeStageButton = CreateButton("HomeStageModeButton", robotPage.transform,
+            HomeStageSettings.ButtonText(HomeStageSettings.DefaultMode), 36f, NeutralColor);
+        SetLayoutHeight(homeStageButton.gameObject, 72f);
+
         // --- Controls page ---
         GameObject controlsPage = CreateTabPage(content, "SettingsPage_Controls");
 
@@ -1132,6 +1140,8 @@ public class BuildHomeScene
         so.FindProperty("reverseDriveToggle").objectReferenceValue = reverseDriveToggle;
         so.FindProperty("liteFieldToggle").objectReferenceValue = liteFieldToggle;
         so.FindProperty("performanceStatsToggle").objectReferenceValue = performanceStatsToggle;
+        so.FindProperty("homeStageButton").objectReferenceValue = homeStageButton;
+        so.FindProperty("stageView").objectReferenceValue = stageView;
         so.FindProperty("robotCodeInput").objectReferenceValue = robotCodeInput;
         so.FindProperty("robotCodeStatusLabel").objectReferenceValue = robotCodeStatus;
         so.FindProperty("yourCodesLabel").objectReferenceValue = yourCodesLabel;

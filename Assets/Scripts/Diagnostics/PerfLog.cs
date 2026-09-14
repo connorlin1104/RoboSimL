@@ -13,6 +13,10 @@ public static class PerfLog
     // A robot went up on the home stage, drawn and showing. The first one after a launch is the launch's "robot" time.
     public const string StageRobotShown = "stage_robot_shown";
 
+    // The home stage was switched between Drift, Still and Off in Settings > Robot > Performance; the detail is the new
+    // mode. The log's stage column carries it on every row after.
+    public const string StageModeChanged = "stage_mode";
+
     public static event Action<string, string> Reported;
 
     public static bool Listening => Reported != null;

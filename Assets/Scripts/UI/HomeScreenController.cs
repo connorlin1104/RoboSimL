@@ -100,6 +100,10 @@ public class HomeScreenController : MonoBehaviour
     [Header("Performance")]
     [Tooltip("Checkbox for the performance readout (persisted via PerformanceStatsSettings). Puts PerfOverlay up — frame times, heat, memory — and logs them to the app's Files folder.")]
     [SerializeField] private Toggle performanceStatsToggle;
+    [Tooltip("Steps the home screen's robot through Turning, Still and Off (persisted via HomeStageSettings), switching the stage at once.")]
+    [SerializeField] private Button homeStageButton;
+    [Tooltip("The home stage's view, which the button above switches.")]
+    [SerializeField] private RobotStageView stageView;
 
     [Header("Robot Codes")]
     [Tooltip("Where the player types an owner code to reveal a private robot (RobotOwnerSettings).")]
@@ -165,6 +169,7 @@ public class HomeScreenController : MonoBehaviour
         InitReverseDriveControl();
         InitLiteFieldControl();
         InitPerformanceStatsControl();
+        InitHomeStageControl();
         InitDriveFeelControls();
         SetTab(0);
         SetCodeStatus(string.Empty);
@@ -939,6 +944,25 @@ public class HomeScreenController : MonoBehaviour
         {
             PerformanceStatsSettings.Show = value;
             PerfOverlay.SetShown(value);
+        });
+    }
+
+    // A button rather than a checkbox, because the stage has three modes. The saved one goes onto the stage here, before
+    // the stage puts its first robot up, so a player who chose Off never sees it turn first.
+    private void InitHomeStageControl()
+    {
+        if (stageView != null) stageView.SetMode(HomeStageSettings.Mode);
+        if (homeStageButton == null) return;
+
+        TextMeshProUGUI label = homeStageButton.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (label != null) label.text = HomeStageSettings.ButtonText(HomeStageSettings.Mode);
+        homeStageButton.onClick.AddListener(() =>
+        {
+            RobotStageView.StageMode next = HomeStageSettings.Next(HomeStageSettings.Mode);
+            HomeStageSettings.Mode = next;
+            if (stageView != null) stageView.SetMode(next);
+            if (label != null) label.text = HomeStageSettings.ButtonText(next);
+            PerfLog.Report(PerfLog.StageModeChanged, next.ToString());
         });
     }
 }

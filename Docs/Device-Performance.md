@@ -1,8 +1,9 @@
 # Device performance check
 
 Measuring the app on the phone. The phone can't be connected to Xcode or to Unity's profiler, so
-the app measures itself: **Settings ▸ Robot ▸ Show Performance Stats** puts a readout in the corner
-of every screen and writes the same numbers to a file once a second.
+the app measures itself: **Settings ▸ Robot ▸ Show Performance Stats** puts a thin see-through
+column of numbers in the top-left corner (under L1/L2 in a game) and writes the same numbers to a
+file once a second.
 
 - What it answers — the numbers the home stage (UI Stage 3) has never had from a real device
   - How long a cold launch takes to reach the home screen, and to put the robot on the stage
@@ -11,10 +12,9 @@ of every screen and writes the same numbers to a file once a second.
 - Needs a build that has it — its Settings ▸ Robot page ends in a **Performance** section
 - Needs **Frame Timing Stats** on (Player Settings ▸ Other Settings; `enableFrameTimingStats: 1` in
   `ProjectSettings.asset`)
-  - Off, a release build measures no CPU or GPU time, and the readout says
-    `CPU and GPU: Frame Timing Stats is off`
+  - Off, a release build measures no CPU or GPU time, and the readout's `CPU` and `GPU` say `off`
   - `Validate Performance Overlay` fails while it's off
-- The readout itself costs next to nothing: one line of text redrawn once a second
+- The readout itself costs next to nothing: two short columns of text redrawn once a second
 
 ---
 
@@ -23,7 +23,7 @@ of every screen and writes the same numbers to a file once a second.
 - **Unplug the phone**
   - Charging heats the battery, and heat is one of the things being measured
 - **Low Power Mode off**
-  - It caps the CPU, the GPU and the screen's refresh rate. The readout says `Low Power Mode` while
+  - It caps the CPU, the GPU and the screen's refresh rate. The readout adds a `Low Power` row while
     it's on
 - **Start cool** — the readout's `Heat` should say `Nominal`
   - If it says `Fair` or worse, let the phone sit for a few minutes first
@@ -32,6 +32,8 @@ of every screen and writes the same numbers to a file once a second.
 
 1. Settings ▸ Robot ▸ scroll to the bottom ▸ tick **Show Performance Stats**
    - The readout appears at once, top-left, and a new log starts
+   - The button under it, **Home Screen Robot**, switches the home screen's robot between
+     `Turning`, `Still` and `Off`. The runs below use it
 2. Leave it ticked for the whole check
    - It stays on across launches, and a launch is only measured when the app *starts* with it on
 
@@ -39,37 +41,38 @@ of every screen and writes the same numbers to a file once a second.
 
 1. **Three cold launches**
    - Swipe the app away in the app switcher, wait ~10 s, tap the icon
-   - Wait on the home screen until the readout's `Launch` line ends in `slowest ... ms`
-     - That's 5 s after the first frame: the window where first-time shader compiles show up
+   - Wait on the home screen for about 10 s after the robot appears
+     - The log sums the launch up once its first 5 s are over and the robot is showing. Those 5 s
+       are the window where first-time shader compiles show up
    - Each launch writes its own log
 2. **10 minutes on the home screen, robot turning**
-   - Don't touch anything. The button under the readout says `Stage: Drift`
-3. **10 minutes on the home screen, stage off**
-   - Tap the stage button twice: `Drift` → `Still` → `Off`
-   - `Off` shows the chassis mark and draws nothing. The difference from run 2 is what the stage
-     costs
-   - `Still` draws the robot once, as a picture — worth a couple of minutes if `Off` shows the stage
+   - Home Screen Robot on `Turning`, the default. Close Settings and don't touch anything
+3. **10 minutes on the home screen, robot off**
+   - Settings ▸ Robot ▸ tap **Home Screen Robot** twice: `Turning` → `Still` → `Off`. Close Settings
+   - `Off` shows the chassis mark and draws nothing. The difference from run 2 is what the turning
+     robot costs
+   - `Still` draws the robot once, as a picture — worth a couple of minutes if `Off` shows the robot
      is expensive
-   - The stage goes back to `Drift` whenever the home screen reloads, e.g. after a Drive
+   - It's a setting, so it stays: tap it back to `Turning` when you're done
 4. **10 minutes driving**
    - Settings ▸ Robot ▸ Lite Field on, then Drive (or the full field, if that's the one in question)
    - Drive the way you normally would. The log also records how long the field took to load
 
 ## Reading the readout
 
-- `60 fps   CPU 6.1 ms   GPU 4.4 ms` — frames per second over the last second, and the average time
-  the main thread and the GPU spent on one frame
-  - The app caps itself at 60 fps, so a frame has 16.7 ms. The CPU and GPU times are how much of that
-    is used; the rest is headroom
-- `Slowest frame 21 ms   Heat Nominal` — the worst frame in the last second, and iOS's own heat level
-  - Heat goes `Nominal` → `Fair` → `Serious` → `Critical`. From `Serious` iOS slows the phone down to
+- `FPS 60` — frames in the last second. The app caps itself at 60, so a frame has 16.7 ms
+- `CPU 6.1 ms`, `GPU 4.4 ms` — the average time the main thread and the GPU spent on one frame. The
+  rest of the 16.7 ms is headroom
+- `Worst 21 ms` — the slowest frame in the last second: a hitch shows up here
+- `Heat Nominal` — iOS's own heat level
+  - It goes `Nominal` → `Fair` → `Serious` → `Critical`. From `Serious` iOS slows the phone down to
     cool it, and every frame time after that point measures a throttled phone
-- `Memory 412 MB, 1434 MB to spare` — what iOS counts against the app, and how much more it may take
-  before iOS closes it
-- `Launch 2.41 s   robot 2.95 s   slowest 183 ms` (home screen, launched with the stats on) — seconds
-  from tapping the icon to the first frame, and to the robot showing on the stage
-- `Loaded LiteScene in 3.21 s` — the last scene load
-- `Recording perf-20260913-143210.csv` — the log being written
+- `RAM 412 MB` — the memory iOS counts against the app. How much more it may take before iOS closes
+  it is in the log (`headroom_mb`)
+- `Low Power` — only there while Low Power Mode is on
+- Long times read `1.2 s` and big memory `1.4 GB`, so the column never gets wider
+- Launch and load times aren't on screen. They're in the log: the `launch` row, and each scene's
+  `first_frame` row
 
 ## Getting the logs to the Mac
 
@@ -92,7 +95,7 @@ of every screen and writes the same numbers to a file once a second.
   | `heat`, `low_power` | `Nominal`/`Fair`/`Serious`/`Critical`, and `1` for Low Power Mode |
   | `footprint_mb`, `headroom_mb` | memory iOS counts against the app, and what's left before it closes it |
   | `battery_pct`, `power` | battery level, and `Discharging` / `Charging` / `Full` |
-  | `stage` | the home stage: `Drift`, `Still`, `Off`, or `hidden` behind a full-screen page |
+  | `stage` | the home stage: `Drift` (`Turning` in Settings), `Still`, `Off`, or `hidden` behind a full-screen page |
 
   - An empty cell is "not measured" — the editor has no heat or memory figures, for one
 - Rows with `kind` = `event` in between, with `event` and `detail` filled in:
@@ -102,8 +105,9 @@ of every screen and writes the same numbers to a file once a second.
     building it) and `ready_ms` (from picking it to seeing it)
   - `launch` — once a launch's first 5 s are over and its robot is showing: its first frame, robot
     and slowest frame
-  - `load_requested`, `stage_mode`, `heat`, `low_power`, `low_memory`, `background`, `foreground`,
-    `quit`, `stats_off`
+  - `stage_mode` — Home Screen Robot switched in Settings
+  - `load_requested`, `heat`, `low_power`, `low_memory`, `background`, `foreground`, `quit`,
+    `stats_off`
 
 ## Turning it off
 

@@ -8,6 +8,7 @@ using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
@@ -20,10 +21,13 @@ using Object = UnityEngine.Object;
 //     for iOS alone. A missing name fails in Xcode, twenty minutes into an archive; a wrong type returns garbage.
 //   - A second's frames come out as the numbers they should, a frame reported twice counting once.
 //   - Every row has one cell per column, whatever language the phone is in: German writes 7.2 as "7,2".
-//   - Every line the panel can print is in its font, whose glyphs are baked in advance: anything else is an empty box.
-//   - Only the stage button takes a touch, so the panel never blocks the controls under it; and it measures in the same
-//     canvas units as the home screen, so the positions it is placed at mean what they say.
-//   - The switch is on Settings > Robot, wired, and off.
+//   - The panel is a thin column of six short rows (FPS, CPU, GPU, Worst, Heat, RAM) and a Low Power row only while that
+//     mode is on; every row fits its column, and all of it is in the font, whose glyphs are baked in advance.
+//   - Nothing on the panel takes a touch, so it never blocks the controls under it. In the home screen's corner it ends
+//     before the title's first letter with the title docked on the narrowest screen, and in a game it starts below L1
+//     and L2 in both field scenes. It measures in the same canvas units as the home screen, so its positions mean what
+//     they say.
+//   - The switch is on Settings > Robot, wired, and off, with the home robot's Turning / Still / Off button under it.
 //
 // Each check that could pass by not looking also has to refuse a mistake made on purpose (ValidationUtil.Checks.Refuses).
 //
@@ -53,8 +57,10 @@ public static class PerfOverlayValidation
         Window(checks);
         Csv(checks);
         Readout(checks);
-        CanvasScaler homeScaler = SettingsSwitch(checks);
-        Panel(checks, homeScaler);
+        HomeScreen home = Switches(checks);
+        Panel(checks, home);
+        // Last: it opens the field scenes, and the HomeScene objects above go with the scene they came from.
+        FieldClearance(checks);
 
         if (checks.Failures.Count == 0) return $"{Title}: PASSED ({checks.Count} checks).";
         var report = new StringBuilder($"{checks.Failures.Count} of {checks.Count} checks failed:");
@@ -263,50 +269,96 @@ public static class PerfOverlayValidation
 
     // --- What the panel prints ---
 
+    private static readonly string[] RowLabels = { "FPS", "CPU", "GPU", "Worst", "Heat", "RAM" };
+    private const string LowPowerLabel = "Low Power";
+    private const float MinRowGap = 8f;   // canvas units between a row's label and its value
+
     private static void Readout(ValidationUtil.Checks checks)
     {
         TMP_FontAsset font = PerfOverlay.Font;
         checks.That(font != null, "TextMesh Pro has no default font asset, so the panel has nothing to draw with");
         if (font == null) return;
 
-        var lines = new List<string>();
+        var readings = new List<PerfOverlay.Reading>();
         foreach (DeviceStats.Thermal heat in Enum.GetValues(typeof(DeviceStats.Thermal)))
-        {
             foreach (bool timing in new[] { true, false })
-            {
                 foreach (int lowPower in new[] { -1, 0, 1 })
-                {
-                    lines.Add(PerfOverlay.FormatReadout(new PerfOverlay.Reading
+                    readings.Add(new PerfOverlay.Reading
                     {
-                        fps = timing ? 59.6 : double.NaN,
-                        worstFrameMs = 183.2,
-                        cpuMainMs = timing ? 6.1 : double.NaN,
-                        gpuMs = 12.25,
-                        frameTiming = timing,
-                        heat = heat,
-                        lowPower = lowPower,
-                        footprintMb = lowPower < 0 ? -1 : 412.3,
-                        headroomMb = lowPower < 0 ? -1 : 1433.9,
-                        launchLine = PerfOverlay.FormatLaunch(2.41, lowPower == 1 ? -1 : 2.95, 183.0, timing),
-                        loadLine = PerfOverlay.FormatLoad("LiteScene", 3.2),
-                        logName = "perf-20260913-143210.csv",
-                        // An error in the phone's own language, which the panel must not print as boxes.
-                        logError = lowPower == 0 ? "ディスクがいっぱいです (Größe)" : string.Empty,
-                    }));
-                }
-            }
-        }
-        foreach (RobotStageView.StageMode mode in Enum.GetValues(typeof(RobotStageView.StageMode)))
-            lines.Add(PerfOverlay.StageButtonText(mode));
-
-        foreach (string line in lines)
+                        fps = timing ? 59.6 : double.NaN, worstFrameMs = 183.2, cpuMainMs = timing ? 6.1 : double.NaN,
+                        gpuMs = 12.25, frameTiming = timing, heat = heat, lowPower = lowPower, footprintMb = lowPower < 0 ? -1 : 412.3,
+                    });
+        // The widest each value gets before it changes unit, and far past that: what the column has to hold.
+        readings.Add(new PerfOverlay.Reading
         {
-            string missing = Missing(font, line);
-            checks.That(missing == null, $"the panel can print \"{line.Replace('\n', '|')}\", but its font has no glyph for {missing}");
-        }
+            fps = 120, worstFrameMs = 999.4, cpuMainMs = 99.94, gpuMs = 999.4, frameTiming = true,
+            heat = DeviceStats.Thermal.Critical, lowPower = 1, footprintMb = 999.4,
+        });
+        readings.Add(new PerfOverlay.Reading
+        {
+            fps = 1000, worstFrameMs = 99999, cpuMainMs = 123456, gpuMs = 99.96, frameTiming = true,
+            heat = DeviceStats.Thermal.Nominal, lowPower = 1, footprintMb = 123456,
+        });
 
-        // The check has to be able to fail: a character the font doesn't have.
-        checks.Refuses(() => Throw(Missing(font, "Heat 中")), "a line with a character the font doesn't have");
+        var root = new GameObject("PerfReadoutCheck") { hideFlags = HideFlags.HideAndDontSave };
+        try
+        {
+            PerfOverlay.Parts parts = PerfOverlay.BuildUi(root.transform);
+            foreach (PerfOverlay.Reading reading in readings)
+            {
+                List<PerfOverlay.Row> rows = PerfOverlay.ReadoutRows(reading);
+                string problem = RowsProblem(reading, rows);
+                checks.That(problem == null, problem);
+                foreach (bool values in new[] { false, true })
+                {
+                    string column = PerfOverlay.Column(rows, values);
+                    string missing = Missing(font, column);
+                    checks.That(missing == null, $"the panel can print \"{column.Replace('\n', '|')}\", but its font has no glyph for {missing}");
+                }
+                string wide = WidthProblem(parts, rows);
+                checks.That(wide == null, wide);
+            }
+
+            // All three checks have to be able to fail: a row the column can't hold, a row a player has no use for, and
+            // a character the font doesn't have.
+            List<PerfOverlay.Row> tooLong = PerfOverlay.ReadoutRows(readings[0]);
+            tooLong[3] = new PerfOverlay.Row("Slowest frame", "1199 ms");
+            checks.Refuses(() => Throw(WidthProblem(parts, tooLong)), "a row wider than the column");
+            List<PerfOverlay.Row> extra = PerfOverlay.ReadoutRows(readings[0]);
+            extra.Add(new PerfOverlay.Row("Log", "perf-20260913-143210.csv"));
+            checks.Refuses(() => Throw(RowsProblem(readings[0], extra)), "a row the panel shouldn't have");
+            checks.Refuses(() => Throw(Missing(font, "Heat 中")), "a line with a character the font doesn't have");
+        }
+        finally
+        {
+            Object.DestroyImmediate(root);
+        }
+    }
+
+    // Null when the rows are the panel's six, in order, and then Low Power when, and only when, that mode is on.
+    private static string RowsProblem(PerfOverlay.Reading reading, List<PerfOverlay.Row> rows)
+    {
+        var expected = new List<string>(RowLabels);
+        if (reading.lowPower == 1) expected.Add(LowPowerLabel);
+        var labels = new List<string>();
+        foreach (PerfOverlay.Row row in rows) labels.Add(row.label);
+        return string.Join("|", labels) == string.Join("|", expected) ? null
+            : $"the panel's rows should be {string.Join(", ", expected)}; they are {string.Join(", ", labels)}";
+    }
+
+    // Null when every row's label and value fit side by side in the column, measured by TextMesh Pro in the panel's own
+    // font and size; else the first row that doesn't.
+    private static string WidthProblem(PerfOverlay.Parts parts, List<PerfOverlay.Row> rows)
+    {
+        float column = parts.labels.rectTransform.sizeDelta.x;
+        foreach (PerfOverlay.Row row in rows)
+        {
+            float label = parts.labels.GetPreferredValues(row.label).x;
+            float value = string.IsNullOrEmpty(row.value) ? 0f : parts.values.GetPreferredValues(row.value).x;
+            if (label + MinRowGap + value > column)
+                return $"the row \"{row.label}  {row.value}\" needs {label + MinRowGap + value:0} units but the column is {column:0}";
+        }
+        return null;
     }
 
     // The characters in `text` the font has no glyph for, line breaks aside; null when it has them all. TMP answers
@@ -320,70 +372,249 @@ public static class PerfOverlayValidation
         return string.Join(", ", names);
     }
 
-    // --- The switch ---
+    // --- The switches in Settings ---
 
-    private static CanvasScaler SettingsSwitch(ValidationUtil.Checks checks)
+    // What the panel's own checks need from HomeScene: its canvas scaler, and the title the panel has to stay clear of.
+    private struct HomeScreen
+    {
+        public CanvasScaler scaler;
+        public RectTransform title;
+    }
+
+    private static HomeScreen Switches(ValidationUtil.Checks checks)
     {
         Scene scene = EditorSceneManager.OpenScene(RoboSimPaths.HomeScene, OpenSceneMode.Single);
+        var home = new HomeScreen();
         HomeScreenController controller = null;
-        CanvasScaler scaler = null;
         foreach (GameObject root in scene.GetRootGameObjects())
         {
             if (controller == null) controller = root.GetComponentInChildren<HomeScreenController>(true);
             Canvas canvas = root.GetComponent<Canvas>();
-            if (scaler == null && canvas != null && canvas.renderMode == RenderMode.ScreenSpaceOverlay)
-                scaler = root.GetComponent<CanvasScaler>();
+            if (home.scaler == null && canvas != null && canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+                home.scaler = root.GetComponent<CanvasScaler>();
+            TitleDock dock = root.GetComponentInChildren<TitleDock>(true);
+            if (home.title == null && dock != null) home.title = (RectTransform)dock.transform;
         }
         checks.That(controller != null, "HomeScene has no HomeScreenController");
-        if (controller == null) return scaler;
+        if (controller == null) return home;
 
-        var toggle = new SerializedObject(controller).FindProperty("performanceStatsToggle").objectReferenceValue as Toggle;
+        var so = new SerializedObject(controller);
+        var toggle = so.FindProperty("performanceStatsToggle").objectReferenceValue as Toggle;
         checks.That(toggle != null, "HomeScreenController's performanceStatsToggle isn't wired. Run Tools > RoboSim > Scenes > Build Home Screen");
-        if (toggle == null) return scaler;
+        if (toggle == null) return home;
 
         TMP_Text label = toggle.GetComponentInChildren<TMP_Text>(true);
         checks.That(label != null && label.text == "Show Performance Stats",
             $"the switch should read \"Show Performance Stats\"; it reads \"{(label != null ? label.text : null)}\"");
-        bool onRobotPage = false;
-        for (Transform t = toggle.transform; t != null; t = t.parent)
-            if (t.name == "SettingsPage_Robot") onRobotPage = true;
-        checks.That(onRobotPage, "the switch isn't on Settings > Robot, which is where Docs/Device-Performance.md sends you");
+        checks.That(OnRobotPage(toggle.transform), "the switch isn't on Settings > Robot, which is where Docs/Device-Performance.md sends you");
         checks.That(!PerformanceStatsSettings.DefaultShow && !toggle.isOn,
             "the switch must ship off: the readout is for measuring the app, not for playing it");
-        return scaler;
+
+        HomeStageButton(checks, so, toggle);
+        return home;
+    }
+
+    // The home robot's button: right under the switch, pointed at the stage it switches, saying what the stage does before
+    // anyone has pressed it, and stepping through every mode.
+    private static void HomeStageButton(ValidationUtil.Checks checks, SerializedObject so, Toggle performanceSwitch)
+    {
+        var button = so.FindProperty("homeStageButton").objectReferenceValue as Button;
+        var view = so.FindProperty("stageView").objectReferenceValue as RobotStageView;
+        checks.That(button != null && view != null,
+            "HomeScreenController's homeStageButton or stageView isn't wired, so the home robot can't be switched. " +
+            "Run Tools > RoboSim > Scenes > Build Home Screen");
+        if (button == null) return;
+
+        checks.That(button.transform.parent == performanceSwitch.transform.parent &&
+                    button.transform.GetSiblingIndex() == performanceSwitch.transform.GetSiblingIndex() + 1,
+            "the home robot's button should sit right under Show Performance Stats");
+
+        TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
+        string first = HomeStageSettings.ButtonText(HomeStageSettings.DefaultMode);
+        checks.That(label != null && label.text == first,
+            $"the home robot's button should read \"{first}\" in the scene; it reads \"{(label != null ? label.text : null)}\"");
+
+        var modes = (RobotStageView.StageMode[])Enum.GetValues(typeof(RobotStageView.StageMode));
+        foreach (RobotStageView.StageMode mode in modes)
+        {
+            string text = HomeStageSettings.ButtonText(mode);
+            string missing = label != null ? Missing(label.font, text) : null;
+            checks.That(missing == null, $"the home robot's button can say \"{text}\", but its font has no glyph for {missing}");
+            checks.That(HomeStageSettings.Parse(mode.ToString()) == mode,
+                $"a stored {mode} reads back as {HomeStageSettings.Parse(mode.ToString())}");
+        }
+        checks.That(HomeStageSettings.DefaultMode == RobotStageView.StageMode.Drift, "the home robot should turn until someone changes it");
+        // Only a name written by the setting itself counts: not a number, not the wrong case, not a combination of flags.
+        foreach (string unreadable in new[] { string.Empty, "1", "off", "Drift, Off" })
+            checks.That(HomeStageSettings.Parse(unreadable) == HomeStageSettings.DefaultMode,
+                $"a stored \"{unreadable}\" should read as {HomeStageSettings.DefaultMode}; it reads as {HomeStageSettings.Parse(unreadable)}");
+
+        // Presses go Turning, Still, Off and back: every mode once, then the first again.
+        var seen = new HashSet<RobotStageView.StageMode>();
+        RobotStageView.StageMode at = HomeStageSettings.DefaultMode;
+        for (int i = 0; i < modes.Length; i++)
+        {
+            seen.Add(at);
+            at = HomeStageSettings.Next(at);
+        }
+        checks.That(at == HomeStageSettings.DefaultMode && seen.Count == modes.Length,
+            $"{modes.Length} presses of the home robot's button should visit every mode once and come back to the first");
+    }
+
+    private static bool OnRobotPage(Transform t)
+    {
+        for (; t != null; t = t.parent)
+            if (t.name == "SettingsPage_Robot") return true;
+        return false;
     }
 
     // --- The panel ---
 
-    private static void Panel(ValidationUtil.Checks checks, CanvasScaler home)
+    private static void Panel(ValidationUtil.Checks checks, HomeScreen home)
     {
         var root = new GameObject("PerfOverlayCheck") { hideFlags = HideFlags.HideAndDontSave };
+        var leaky = new GameObject("PerfOverlayLeak") { hideFlags = HideFlags.HideAndDontSave };
         try
         {
             PerfOverlay.Parts parts = PerfOverlay.BuildUi(root.transform);
 
-            var takers = new List<string>();
-            foreach (Graphic graphic in root.GetComponentsInChildren<Graphic>(true))
-                if (graphic.raycastTarget) takers.Add(graphic.name);
-            checks.That(takers.Count == 1 && parts.stageButton.targetGraphic != null && takers[0] == parts.stageButton.targetGraphic.name,
-                "only the stage button may take a touch — the panel sits over a field's controls — but these do: " +
-                string.Join(", ", takers));
+            string touch = TouchProblem(root);
+            checks.That(touch == null, touch);
+            // The check has to be able to fail: the same panel, given back the raycaster it used to have.
+            PerfOverlay.BuildUi(leaky.transform);
+            leaky.AddComponent<GraphicRaycaster>();
+            checks.Refuses(() => Throw(TouchProblem(leaky)), "a panel whose canvas can take a touch");
 
-            string missing = Missing(PerfOverlay.Font, parts.readout.text + parts.stageLabel.text);
+            string missing = Missing(PerfOverlay.Font, parts.labels.text);
             checks.That(missing == null, $"the panel's first words need glyphs its font doesn't have: {missing}");
 
-            // Its positions are written in the home screen's canvas units, so its canvas has to measure the same way.
+            checks.That(parts.panel.anchoredPosition == PerfOverlay.HomePosition && parts.panel.pivot == new Vector2(0f, 1f) &&
+                        parts.panel.anchorMin == new Vector2(0f, 1f) && parts.panel.anchorMax == new Vector2(0f, 1f) &&
+                        Mathf.Approximately(parts.panel.sizeDelta.x, PerfOverlay.PanelWidth),
+                "the panel should start as a PanelWidth-wide column hung from the top-left corner at PerfOverlay.HomePosition");
+            string title = TitleProblem(PerfOverlay.HomePosition, PerfOverlay.PanelWidth, home.title, home.scaler);
+            checks.That(title == null, title);
+            if (home.title != null && home.scaler != null)
+                checks.Refuses(() => Throw(TitleProblem(PerfOverlay.HomePosition, 560f, home.title, home.scaler)),
+                    "the old 560-wide panel in the corner, which the docked title slid under");
+
+            // Its position is written in the home screen's canvas units, so its canvas has to measure the same way.
             CanvasScaler own = root.GetComponent<CanvasScaler>();
-            checks.That(home != null, "HomeScene has no ScreenSpaceOverlay canvas with a CanvasScaler to compare against");
-            if (home != null)
-                checks.That(own.uiScaleMode == home.uiScaleMode && own.referenceResolution == home.referenceResolution &&
-                            Mathf.Approximately(own.matchWidthOrHeight, home.matchWidthOrHeight),
+            checks.That(home.scaler != null, "HomeScene has no ScreenSpaceOverlay canvas with a CanvasScaler to compare against");
+            if (home.scaler != null)
+                checks.That(own.uiScaleMode == home.scaler.uiScaleMode && own.referenceResolution == home.scaler.referenceResolution &&
+                            Mathf.Approximately(own.matchWidthOrHeight, home.scaler.matchWidthOrHeight),
                     $"the panel's canvas scales as {own.referenceResolution} match {own.matchWidthOrHeight}, the home screen's as " +
-                    $"{home.referenceResolution} match {home.matchWidthOrHeight}, so its positions would land somewhere else");
+                    $"{home.scaler.referenceResolution} match {home.scaler.matchWidthOrHeight}, so its position would land somewhere else");
         }
         finally
         {
             Object.DestroyImmediate(root);
+            Object.DestroyImmediate(leaky);
         }
+    }
+
+    // Null when nothing under root can take a touch, else what can. A canvas with no raycaster takes none at all; a
+    // Selectable or a raycast-target graphic is listed too, because it would start taking them the moment a raycaster
+    // came back.
+    private static string TouchProblem(GameObject root)
+    {
+        var takers = new List<string>();
+        foreach (BaseRaycaster raycaster in root.GetComponentsInChildren<BaseRaycaster>(true))
+            takers.Add($"a {raycaster.GetType().Name} on {raycaster.name}");
+        foreach (Selectable selectable in root.GetComponentsInChildren<Selectable>(true))
+            takers.Add($"a {selectable.GetType().Name} ({selectable.name})");
+        foreach (Graphic graphic in root.GetComponentsInChildren<Graphic>(true))
+            if (graphic.raycastTarget) takers.Add($"{graphic.name}, a raycast target");
+        return takers.Count == 0 ? null
+            : "nothing on the panel may take a touch, since it sits over a field's controls, but these can: " + string.Join(", ", takers);
+    }
+
+    // The screen shape on which the docked title reaches furthest into the panel's corner: the narrowest, a 4:3 iPad.
+    private const float NarrowestAspect = 4f / 3f;
+    private const float TitleMargin = 12f;
+
+    // Null when a panel `width` wide at `position` ends at least TitleMargin short of the home title's first letter, with
+    // the title docked over the stage on the narrowest screen: that is where it comes closest, sliding into the corner's
+    // row as Settings opens. Worked out in canvas units from the scene: the title's docked anchor span, its centred text
+    // at the size TextMesh Pro gives it (GetPreferredValues measures an auto-sized text at its largest size), and the
+    // canvas width a 4:3 screen has at the home canvas's scaler settings.
+    private static string TitleProblem(Vector2 position, float width, RectTransform title, CanvasScaler scaler)
+    {
+        if (title == null || scaler == null) return "HomeScene has no docking title or canvas scaler to measure the panel against";
+        var text = title.GetComponent<TMP_Text>();
+        var dock = title.GetComponent<TitleDock>();
+        var stage = title.parent as RectTransform;
+        if (text == null || dock == null || stage == null || stage.parent == null || stage.parent.GetComponent<Canvas>() == null ||
+            stage.anchorMin.x != 0f || stage.anchorMax.x != 1f || stage.offsetMin.x != 0f || stage.offsetMax.x != 0f ||
+            text.horizontalAlignment != HorizontalAlignmentOptions.Center)
+            return "the title or HomeStage changed shape (HomeStage should fill the canvas's width, the title be centred in " +
+                   "its span), so the check can't say where the title's first letter lands";
+        float canvasWidth = CanvasWidth(NarrowestAspect, scaler);
+        float left = title.anchorMin.x * canvasWidth + title.anchoredPosition.x - title.sizeDelta.x * title.pivot.x;
+        float right = dock.dockedAnchorMaxX * canvasWidth + title.anchoredPosition.x + title.sizeDelta.x * (1f - title.pivot.x);
+        float letters = Mathf.Min(text.GetPreferredValues(text.text).x, right - left);
+        float firstLetter = (left + right) / 2f - letters / 2f;
+        float panelRight = position.x + width;
+        return panelRight + TitleMargin <= firstLetter ? null
+            : $"with Settings open on a 4:3 screen the title's first letter lands {firstLetter:0} in, but the panel reaches " +
+              $"{panelRight:0} (it has to stop {TitleMargin:0} short), so the title would slide under it";
+    }
+
+    // How wide the canvas is on a screen of this shape: CanvasScaler's MatchWidthOrHeight mixes the two scale factors in
+    // log2 space.
+    private static float CanvasWidth(float aspect, CanvasScaler scaler)
+    {
+        float height = 1000f, width = aspect * height;
+        float logWidth = Mathf.Log(width / scaler.referenceResolution.x, 2f);
+        float logHeight = Mathf.Log(height / scaler.referenceResolution.y, 2f);
+        return width / Mathf.Pow(2f, Mathf.Lerp(logWidth, logHeight, scaler.matchWidthOrHeight));
+    }
+
+    // --- In a game ---
+
+    private const string ShoulderCluster = "ShoulderButtonsLeft";   // BuildDriveControls' L1 + L2 group
+
+    // In a game the panel steps down under L1 and L2. Read off both field scenes rather than copied from
+    // BuildDriveControls, so moving the buttons fails here instead of in someone's hands.
+    private static void FieldClearance(ValidationUtil.Checks checks)
+    {
+        foreach (string path in new[] { RoboSimPaths.LiteScene, RoboSimPaths.MainScene })
+        {
+            string problem = ClusterProblem(path, PerfOverlay.FieldPosition, PerfOverlay.PanelWidth);
+            checks.That(problem == null, problem);
+        }
+        // The check has to be able to fail: a panel left at the home screen's spot, on top of L1.
+        checks.Refuses(() => Throw(ClusterProblem(RoboSimPaths.LiteScene, PerfOverlay.HomePosition, PerfOverlay.PanelWidth)),
+            "a panel that stayed in the home screen's corner, on top of L1");
+    }
+
+    // Null when a panel at `position` is clear of the scene's L1/L2 cluster: wholly below it or wholly beside it.
+    private static string ClusterProblem(string scenePath, Vector2 position, float width)
+    {
+        Scene scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        RectTransform cluster = null;
+        foreach (GameObject root in scene.GetRootGameObjects())
+        {
+            foreach (RectTransform rect in root.GetComponentsInChildren<RectTransform>(true))
+            {
+                if (rect.name != ShoulderCluster) continue;
+                cluster = rect;
+                break;
+            }
+            if (cluster != null) break;
+        }
+        if (cluster == null) return $"{scene.name} has no {ShoulderCluster}, so there is nothing to keep the panel off";
+        var scaler = cluster.parent != null ? cluster.parent.GetComponent<CanvasScaler>() : null;
+        if (scaler == null || scaler.referenceResolution != new Vector2(1920f, 1080f) || !Mathf.Approximately(scaler.matchWidthOrHeight, 0.5f) ||
+            cluster.anchorMin != new Vector2(0f, 1f) || cluster.anchorMax != new Vector2(0f, 1f) || cluster.pivot != new Vector2(0f, 1f))
+            return $"{scene.name}'s {ShoulderCluster} is no longer pinned to the top-left corner of a 1920x1080, match-0.5 canvas like " +
+                   "the panel's, so this can't say where L2 ends";
+        float bottom = cluster.anchoredPosition.y - cluster.sizeDelta.y;
+        float right = cluster.anchoredPosition.x + cluster.sizeDelta.x;
+        bool below = position.y <= bottom;
+        bool beside = position.x >= right || position.x + width <= cluster.anchoredPosition.x;
+        return below || beside ? null
+            : $"in {scene.name} the panel at ({position.x:0}, {position.y:0}) sits on L1/L2, which reach {-bottom:0} down";
     }
 }
