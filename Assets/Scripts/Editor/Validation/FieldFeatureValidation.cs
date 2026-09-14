@@ -10,9 +10,10 @@ using UnityEditor.SceneManagement;
 //   - Magnet hold: a lateral bump on the seated cup self-corrects (it stays seated and centered).
 //   - Magnet miss: a cup dropped clearly off-axis is NOT captured (no teleport-in on a miss).
 //   - Roller latch: on the North roller — it holds a face (teleported 30 deg off, it comes back),
-//                   it catches a spin (15 rad/s is stopped on a face inside a budget of travel), and
-//                   a robot can still turn it (a 240 rpm wheel pressed on a face turns it two faces),
-//                   plus a logged sweep of the hook strength behind holdCorrectionPerStep's default.
+//                   it catches a spin (15 rad/s is stopped on a face inside a budget of travel), a
+//                   robot-mass bump clicks it one face, a HARD spin (30-60 rad/s, what a turning
+//                   robot's corner or a swinging arm leaves it with) still turns it only one face, no
+//                   bump in the speed table runs past one face, and two bumps turn it two faces.
 //
 // Edit-mode simulation never runs MonoBehaviours, so the loop calls the public
 // GoalStackMagnet.StepMagnet / RollerSnap.StepDetent between Simulate steps — that is why those
@@ -53,7 +54,8 @@ public static class FieldFeatureValidation
             Run();
             EditorUtility.DisplayDialog("Validate Field Features",
                 "All field-feature smoke tests PASSED (magnet hit, hold, miss; roller latch: holds a face, catches a\n" +
-                "spin, a robot can still turn it; cup magnet; seated pieces sit still; scene rollers match the code).\n" +
+                "spin, one hit is one face at any speed, two hits two faces; cup magnet; seated pieces sit still; scene\n" +
+                "rollers match the code).\n" +
                 "See the Console for details.", "OK");
         }
         catch (System.Exception e)
@@ -118,7 +120,8 @@ public static class FieldFeatureValidation
             throw new System.InvalidOperationException(
                 "Field-feature smoke tests FAILED:\n  - " + string.Join("\n  - ", failures));
         Debug.Log("FieldFeatureValidation: PASSED (magnet hit, hold, miss; roller latch: holds a face, catches a "
-                  + "spin, a robot can still turn it; cup magnet; seated pieces sit still; scene rollers match the code).");
+                  + "spin, one hit is one face at any speed, two hits two faces; cup magnet; seated pieces sit still; "
+                  + "scene rollers match the code).");
     }
 
     // One combined physics step: manual component ticks (edit-mode sim runs no MonoBehaviours),
@@ -288,10 +291,17 @@ public static class FieldFeatureValidation
     private const float MinSpinTravelDeg = 5f;       // ...but at least this, or the spin never registered
     private const float BumpSeconds = 2f;            // RobotBumpsItToTheNextFace: the whole bump, then the catch
     private const float MinBumpAdvanceDeg = 100f;    // ...must click it most of one face forward
-    private const float MaxBumpTravelDeg = 400f;     // ...and never past three faces (that is a free spin)
+    private const float MaxBumpTravelDeg = 180f;     // ...and never past the next face: one hit is one face
     private const float BumperMass = 7f;             // a robot: Darwinbot is 6.5 kg, 654V_v3 11.8
     private const float ClickSpeed = 4f;             // u/s, a firm hit — about half a drivetrain's top speed
-    private static readonly float[] BumpSpeeds = { 1f, 2f, 3f, 4f, 6f };   // the feel table: u/s -> faces
+    // The feel table, u/s -> faces. Up to 6 u/s is a drivetrain's straight hit (about 8-9 u/s flat out); 12 and 16 are a
+    // turning robot's corner or a swinging mechanism, where the roller used to run on through faces (2026-09-13).
+    private static readonly float[] BumpSpeeds = { 1f, 2f, 3f, 4f, 6f, 8f, 12f, 16f };
+    private const float HardHitMass = 12f;           // ...and the hardest hit asserted: about 654V_v3's 11.8 kg...
+    private const float HardHitSpeed = 16f;          // ...at the table's top speed
+    // OneFacePerHardSpin: spins a hit can leave it with. A corner hit kicks it to about speed / 0.35 rad/s, so 30 is
+    // about 10 u/s and 60 about 21. The signs alternate so both directions are caught.
+    private static readonly float[] HardSpins = { 30f, -45f, 60f };
     private const float BumperSize = 1f;             // a 100 mm cube of bumper
     private const float BumperBite = 0.08f;          // how far its underside sits below the roller's highest point
     private const float BumperRunUp = 1.5f;          // starts this far to the side of the axle
@@ -327,6 +337,8 @@ public static class FieldFeatureValidation
         HoldsAFace(magnets, snaps, failures, hinge, snap, rb, axisW);
         CatchesASpin(magnets, snaps, failures, hinge, snap, rb, axisW);
         RobotBumpsItToTheNextFace(magnets, snaps, failures, hinge, snap, rb, axisW);
+        OneFacePerHardSpin(magnets, snaps, failures, hinge, snap, rb, axisW);
+        TwoBumpsTwoFaces(magnets, snaps, failures, hinge, snap, rb, axisW);
     }
 
     // PhysX fills HingeJoint.angle only once the joint has actually MOVED. A roller nothing has
@@ -476,37 +488,97 @@ public static class FieldFeatureValidation
                   $"turned '{hinge.name}' {Mathf.Abs(travel):0.#} deg; {end:0.##} deg off a face and {rest:0.###} rad/s " +
                   $"at {BumpSeconds} s.");
 
-        SpeedTable(magnets, snaps, hinge, snap, rb, axisW);
+        SpeedTable(magnets, snaps, failures, hinge, snap, rb, axisW);
     }
 
-    // Informational — the feel table behind RollerSnap.maxCorrectionPerStep. A bump kicks the roller
-    // to about (speed / corner radius) rad/s and the between-face pull then decides whether that
-    // carries it over the 60-degree midpoint to the next face or drags it back to the one it left,
-    // so the number a driver feels is the speed at which a hit starts to click. One line per speed:
-    // faces advanced, and whether it clicked, was refused, or ran on. The roller is re-seated
-    // between bumps; Run()'s finally reloads the scene from disk regardless.
-    private static void SpeedTable(GoalStackMagnet[] magnets, RollerSnap[] snaps, HingeJoint hinge, RollerSnap snap,
-        Rigidbody rb, Vector3 axisW)
+    // The feel table behind RollerSnap.maxCorrectionPerStep. A bump kicks the roller to about (speed / corner radius)
+    // rad/s and the between-face pull then decides whether that carries it over the 60-degree midpoint to the next face
+    // or drags it back to the one it left, so the number a driver feels is the speed at which a hit starts to click.
+    // Where a hit STARTS to click is informational; that none runs past one face is asserted, at every speed and at
+    // the hardest hit, a heavy robot at the top speed. The roller is re-seated between bumps; Run()'s finally reloads
+    // the scene from disk regardless.
+    private static void SpeedTable(GoalStackMagnet[] magnets, RollerSnap[] snaps, List<string> failures, HingeJoint hinge,
+        RollerSnap snap, Rigidbody rb, Vector3 axisW)
     {
         var table = new System.Text.StringBuilder();
-        table.AppendLine($"FieldFeatureValidation roller speed table — a {BumperMass} kg bumper hitting '{hinge.name}' " +
-                         "on its top corner, by speed (u/s -> degrees, faces):");
-        foreach (float speed in BumpSpeeds)
-        {
-            string seat = Reseat(magnets, snaps, hinge, snap, rb);
-            float turned = BumpAndMeasure(magnets, snaps, hinge, axisW, speed, out string why);
-            if (why != null)
-            {
-                table.AppendLine($"  {speed,4:0.#} u/s -> fixture failed: {why}");
-                continue;
-            }
-            float faces = Mathf.Abs(turned) / RollerSnap.FaceSpacingDeg;
-            string verdict = float.IsNaN(turned) || Mathf.Abs(turned) < MinBumpAdvanceDeg ? "refused"
-                : Mathf.Abs(turned) > MaxBumpTravelDeg ? "RUNS ON" : "clicks";
-            table.AppendLine($"  {speed,4:0.#} u/s -> {Mathf.Abs(turned),6:0.#} deg = {faces:0.0} face(s)  {verdict}{seat}");
-        }
+        table.AppendLine($"FieldFeatureValidation roller speed table — a bumper hitting '{hinge.name}' on its top corner, " +
+                         "by speed and mass (u/s, kg -> degrees, faces):");
+        foreach (float speed in BumpSpeeds) TableRow(magnets, snaps, failures, hinge, snap, rb, axisW, table, speed, BumperMass);
+        TableRow(magnets, snaps, failures, hinge, snap, rb, axisW, table, HardHitSpeed, HardHitMass);
         Reseat(magnets, snaps, hinge, snap, rb);
         Debug.Log(table.ToString());
+    }
+
+    private static void TableRow(GoalStackMagnet[] magnets, RollerSnap[] snaps, List<string> failures, HingeJoint hinge,
+        RollerSnap snap, Rigidbody rb, Vector3 axisW, System.Text.StringBuilder table, float speed, float mass)
+    {
+        string seat = Reseat(magnets, snaps, hinge, snap, rb);
+        float turned = BumpAndMeasure(magnets, snaps, hinge, axisW, speed, out string why, mass);
+        if (why != null)
+        {
+            table.AppendLine($"  {speed,4:0.#} u/s {mass,2:0} kg -> fixture failed: {why}");
+            return;
+        }
+        float faces = Mathf.Abs(turned) / RollerSnap.FaceSpacingDeg;
+        bool runsOn = Mathf.Abs(turned) > MaxBumpTravelDeg;
+        string verdict = float.IsNaN(turned) || Mathf.Abs(turned) < MinBumpAdvanceDeg ? "refused" : runsOn ? "RUNS ON" : "clicks";
+        table.AppendLine($"  {speed,4:0.#} u/s {mass,2:0} kg -> {Mathf.Abs(turned),6:0.#} deg = {faces:0.0} face(s)  {verdict}{seat}");
+        if (runsOn)
+            failures.Add($"roller latch (speed table): a {mass:0} kg bumper at {speed:0.#} u/s ran '{hinge.name}' on " +
+                         $"{Mathf.Abs(turned):0.#} deg, {faces:0.0} faces — one hit must turn it one face at most");
+    }
+
+    // One hit is one face, however hard (Connor, 2026-09-13: "one direct hit turns it over once"). A spin is what a hit
+    // leaves the roller with, and the hook has to take ALL of it out on the next face, not just what it can brake in a
+    // step, or a hard enough one runs on through faces. Each spin starts from rest on a face and must end, a second
+    // later, exactly one face on and at rest.
+    private static void OneFacePerHardSpin(GoalStackMagnet[] magnets, RollerSnap[] snaps, List<string> failures,
+        HingeJoint hinge, RollerSnap snap, Rigidbody rb, Vector3 axisW)
+    {
+        var lines = new System.Text.StringBuilder($"FieldFeatureValidation roller latch (one face per hard spin) on '{hinge.name}':");
+        foreach (float spin in HardSpins)
+        {
+            string seat = Reseat(magnets, snaps, hinge, snap, rb);
+            rb.angularVelocity = axisW * spin;
+            float previous = hinge.angle;
+            float net = 0f;
+            int steps = Mathf.RoundToInt(LatchSpinSeconds / ValidationUtil.StepSeconds);
+            for (int i = 0; i < steps; i++) net += StepAndTurn(magnets, snaps, hinge, ref previous);
+            int faces = Mathf.RoundToInt(Mathf.Abs(net) / RollerSnap.FaceSpacingDeg);
+            float end = Mathf.Abs(FaceErrorDeg(hinge, snap));
+            float speed = AxleSpeed(rb, axisW);
+            lines.Append($"\n  {spin,4:0} rad/s -> {net,7:0.#} deg = {faces} face(s); {end:0.#} deg off a face at {speed:0.##} rad/s{seat}");
+            if (float.IsNaN(net) || faces != 1)
+                failures.Add($"roller latch (one face per hard spin): spun at {spin:0} rad/s, '{hinge.name}' turned {net:0.#} deg, " +
+                             $"{faces} face(s) — it must stop dead on the next face");
+            if (end > MaxDetentErrorDeg || speed > MaxDetentRestSpeed)
+                failures.Add($"roller latch (one face per hard spin): {LatchSpinSeconds} s after a {spin:0} rad/s spin, " +
+                             $"'{hinge.name}' is {end:0.#} deg off a face at {speed:0.##} rad/s — not caught on a face");
+        }
+        Debug.Log(lines.ToString());
+    }
+
+    // ...and a second hit turns it again: 654V v2's two side toggles, the nearer one clicking it and then the other as the
+    // robot turns in, turn it two faces. The hook has to stop the spin, not lock the roller against the next click.
+    private static void TwoBumpsTwoFaces(GoalStackMagnet[] magnets, RollerSnap[] snaps, List<string> failures,
+        HingeJoint hinge, RollerSnap snap, Rigidbody rb, Vector3 axisW)
+    {
+        Reseat(magnets, snaps, hinge, snap, rb);
+        float first = BumpAndMeasure(magnets, snaps, hinge, axisW, ClickSpeed, out string why);
+        float second = why == null ? BumpAndMeasure(magnets, snaps, hinge, axisW, ClickSpeed, out why) : float.NaN;
+        if (why != null)
+        {
+            failures.Add($"roller latch (two bumps, two faces): could not build the bumper — {why}");
+            return;
+        }
+        bool each = !float.IsNaN(first) && !float.IsNaN(second) &&
+                    Mathf.RoundToInt(Mathf.Abs(first) / RollerSnap.FaceSpacingDeg) == 1 &&
+                    Mathf.RoundToInt(Mathf.Abs(second) / RollerSnap.FaceSpacingDeg) == 1;
+        if (!each)
+            failures.Add($"roller latch (two bumps, two faces): two {ClickSpeed} u/s bumps turned '{hinge.name}' " +
+                         $"{Mathf.Abs(first):0.#} deg, then {Mathf.Abs(second):0.#} deg — each should be one face");
+        Debug.Log($"FieldFeatureValidation roller latch (two bumps, two faces): {Mathf.Abs(first):0.#} deg, then " +
+                  $"{Mathf.Abs(second):0.#} deg.");
     }
 
 
@@ -518,7 +590,7 @@ public static class FieldFeatureValidation
     // exactly one. Returns the roller's net travel over BumpSeconds (NaN if its tracker never read),
     // and destroys the cube whatever happens.
     private static float BumpAndMeasure(GoalStackMagnet[] magnets, RollerSnap[] snaps, HingeJoint hinge, Vector3 axisW,
-        float speed, out string why)
+        float speed, out string why, float mass = BumperMass)
     {
         why = null;
         Vector3 axleW = hinge.transform.TransformPoint(hinge.anchor);
@@ -592,7 +664,7 @@ public static class FieldFeatureValidation
         cube.transform.localScale = Vector3.one * BumperSize;
         cube.GetComponent<BoxCollider>().sharedMaterial = chassis;
         Rigidbody body = cube.AddComponent<Rigidbody>();
-        body.mass = BumperMass;
+        body.mass = mass;
         body.useGravity = false;
         body.linearDamping = 0f;
         body.angularDamping = 0f;

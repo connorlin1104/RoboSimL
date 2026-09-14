@@ -8,6 +8,10 @@ using UnityEngine;
 //     face is dragged back under it.
 //   - outside that window the cap is maxCorrectionPerStep, the between-face pull. It fights the
 //     robot on the way off one face and helps it onto the next, symmetrically, like a cam detent.
+//   - and the step it ARRIVES on a face it wasn't on, the CATCH takes every bit of its spin out
+//     (catchOnArrival). The two caps above only brake, a fixed amount a step, so a hard enough hit
+//     used to run on through faces: spun at 60 rad/s it went 4, and a 7 kg bump at 12 u/s went 2.
+//     One hit is one face (Connor, 2026-09-13).
 // The previous model disengaged entirely above a release speed (4 rad/s) and damped the roller down
 // to it before the detent did anything: a roller spun at 15 rad/s coasted ~525 deg on damping alone
 // and then landed on whatever face it happened to be nearest. Rollers are not supposed to coast.
@@ -43,8 +47,10 @@ public class RollerSnap : MonoBehaviour
     [SerializeField] private float holdCorrectionPerStep = 3f;
     [Tooltip("Rotates all 3 detent stops (deg) so they line up with the color faces. 0 = the pose the roller was authored in counts as a face; nudge per roller if a face sits slightly off at rest.")]
     [SerializeField] private float angleOffsetDeg = 0f;
-    [Tooltip("Written to the Rigidbody's angular damping at Start. With no release speed there is nothing to decay below any more; this is what stops a roller flicked hard from carrying momentum through the between-face pull and skipping faces.")]
+    [Tooltip("Written to the Rigidbody's angular damping at Start. With no release speed there is nothing to decay below any more; it slows a roller between faces. Stopping a hard hit from skipping faces is Catch On Arrival's job.")]
     [SerializeField] private float freeSpinDamping = 3f;
+    [Tooltip("THE CATCH: the step the roller reaches a face it wasn't on, ALL of its spin is taken out, not just what Hold Correction can brake in a step, the way the real toggle's hook stops it dead after one flip. One hit turns it one face however hard the hit was; a second hit (a robot's second toggle arm) turns it again; a wheel still turns it face after face while it drives it. How hard a hit has to be to START a click is Max Correction's, and this doesn't change it. MEASURED (FieldFeatureValidation, 2026-09-13): without it, spun at 45 rad/s it ran 2 faces and at 60 rad/s 4, and a 7 kg bump at 12 u/s ran 2; with it, each of those is one face, and 1 and 2 u/s bumps are still refused.")]
+    [SerializeField] private bool catchOnArrival = true;
 
     // For the editor pass, which bakes the damping onto the Rigidbody at attach time so the value is
     // live even before Start runs (e.g. in edit-mode Physics.Simulate, where Start never fires).
@@ -55,6 +61,12 @@ public class RollerSnap : MonoBehaviour
 
     private Rigidbody rb;
     private HingeJoint hinge;
+    // The catch's bookkeeping: the roller's angle unwrapped (hinge.angle wraps at +-180, and a roller turned face after
+    // face keeps counting past it), and the face the hook last held it on, counted along that angle.
+    private bool tracking;
+    private float turnedDeg;
+    private float lastAngleDeg;
+    private int heldFace;
 
     void Start()
     {
@@ -95,6 +107,37 @@ public class RollerSnap : MonoBehaviour
         float desiredVel = Mathf.Clamp(errorDeg * Mathf.Deg2Rad * snapStrength, -maxSnapSpeed, maxSnapSpeed);
         float cap = Mathf.Abs(errorDeg) <= latchAngleDeg ? holdCorrectionPerStep : maxCorrectionPerStep;
         float correction = Mathf.Clamp(desiredVel - axisVel, -cap, cap);
+        // THE CATCH: arriving on a new face, the spin goes straight to the seek rate, uncapped: stopped dead, pulled on.
+        if (catchOnArrival && ArrivedOnNewFace(currentAngle)) correction = desiredVel - axisVel;
         rb.AddTorque(axis * correction, ForceMode.VelocityChange);
+    }
+
+    // True the step the roller reaches a face other than the one the hook last held it on: inside that face's latch
+    // window, or already past its centre. From about 28 rad/s a spin crosses the 16-degree window in less than one
+    // 100 Hz step, so waiting for the window alone would let exactly the hits this exists for run straight through.
+    // Short of the new face's window it isn't there yet, so a push that crosses the 60-degree midpoint and falls back
+    // is still the between-face pull's to settle, as before.
+    private bool ArrivedOnNewFace(float angleDeg)
+    {
+        if (!tracking)
+        {
+            tracking = true;
+            turnedDeg = lastAngleDeg = angleDeg;
+            heldFace = Mathf.RoundToInt((turnedDeg - angleOffsetDeg) / FaceSpacingDeg);
+            return false;
+        }
+        turnedDeg += Mathf.DeltaAngle(lastAngleDeg, angleDeg);
+        lastAngleDeg = angleDeg;
+        // Three faces make a turn, so keep the count near zero: a roller turned all match long stays exact.
+        if (turnedDeg > 360f) { turnedDeg -= 360f; heldFace -= 3; }
+        else if (turnedDeg < -360f) { turnedDeg += 360f; heldFace += 3; }
+
+        float faces = (turnedDeg - angleOffsetDeg) / FaceSpacingDeg;
+        int nearest = Mathf.RoundToInt(faces);
+        if (nearest == heldFace) return false;
+        int toward = nearest > heldFace ? 1 : -1;
+        if ((faces - nearest) * toward < -latchAngleDeg / FaceSpacingDeg) return false;   // on its way, not there yet
+        heldFace = nearest;
+        return true;
     }
 }
