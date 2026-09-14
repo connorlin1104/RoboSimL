@@ -21,7 +21,7 @@ using Object = UnityEngine.Object;
 //     for iOS alone. A missing name fails in Xcode, twenty minutes into an archive; a wrong type returns garbage.
 //   - A second's frames come out as the numbers they should, a frame reported twice counting once.
 //   - Every row has one cell per column, whatever language the phone is in: German writes 7.2 as "7,2".
-//   - The panel is a thin column of six short rows (FPS, CPU, GPU, Worst, Heat, RAM) and a Low Power row only while that
+//   - The panel is a thin column of five short rows (FPS, CPU, GPU, Heat, RAM) and a Low Power row only while that
 //     mode is on; every row fits its column, and all of it is in the font, whose glyphs are baked in advance.
 //   - Nothing on the panel takes a touch, so it never blocks the controls under it. In the home screen's corner it ends
 //     before the title's first letter with the title docked on the narrowest screen, and in a game it starts below L1
@@ -269,7 +269,7 @@ public static class PerfOverlayValidation
 
     // --- What the panel prints ---
 
-    private static readonly string[] RowLabels = { "FPS", "CPU", "GPU", "Worst", "Heat", "RAM" };
+    private static readonly string[] RowLabels = { "FPS", "CPU", "GPU", "Heat", "RAM" };
     private const string LowPowerLabel = "Low Power";
     private const float MinRowGap = 8f;   // canvas units between a row's label and its value
 
@@ -285,18 +285,18 @@ public static class PerfOverlayValidation
                 foreach (int lowPower in new[] { -1, 0, 1 })
                     readings.Add(new PerfOverlay.Reading
                     {
-                        fps = timing ? 59.6 : double.NaN, worstFrameMs = 183.2, cpuMainMs = timing ? 6.1 : double.NaN,
+                        fps = timing ? 59.6 : double.NaN, cpuMainMs = timing ? 6.1 : double.NaN,
                         gpuMs = 12.25, frameTiming = timing, heat = heat, lowPower = lowPower, footprintMb = lowPower < 0 ? -1 : 412.3,
                     });
         // The widest each value gets before it changes unit, and far past that: what the column has to hold.
         readings.Add(new PerfOverlay.Reading
         {
-            fps = 120, worstFrameMs = 999.4, cpuMainMs = 99.94, gpuMs = 999.4, frameTiming = true,
+            fps = 120, cpuMainMs = 99.94, gpuMs = 999.4, frameTiming = true,
             heat = DeviceStats.Thermal.Critical, lowPower = 1, footprintMb = 999.4,
         });
         readings.Add(new PerfOverlay.Reading
         {
-            fps = 1000, worstFrameMs = 99999, cpuMainMs = 123456, gpuMs = 99.96, frameTiming = true,
+            fps = 1000, cpuMainMs = 123456, gpuMs = 99.96, frameTiming = true,
             heat = DeviceStats.Thermal.Nominal, lowPower = 1, footprintMb = 123456,
         });
 
@@ -319,8 +319,9 @@ public static class PerfOverlayValidation
                 checks.That(wide == null, wide);
             }
 
-            // All three checks have to be able to fail: a row the column can't hold, a row a player has no use for, and
-            // a character the font doesn't have.
+            // All three checks have to be able to fail: a row the column can't hold (the label the slowest frame would
+            // need to say what it is, which is why the panel doesn't show it), a row a player has no use for, and a
+            // character the font doesn't have.
             List<PerfOverlay.Row> tooLong = PerfOverlay.ReadoutRows(readings[0]);
             tooLong[3] = new PerfOverlay.Row("Slowest frame", "1199 ms");
             checks.Refuses(() => Throw(WidthProblem(parts, tooLong)), "a row wider than the column");

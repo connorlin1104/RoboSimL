@@ -84,7 +84,7 @@ public class PerfOverlay : MonoBehaviour
     // Everything the panel prints, so the text can be made — and checked against the font — without a running app.
     public struct Reading
     {
-        public double fps, worstFrameMs, cpuMainMs, gpuMs;
+        public double fps, cpuMainMs, gpuMs;
         public bool frameTiming;
         public DeviceStats.Thermal heat;
         public int lowPower;
@@ -365,7 +365,6 @@ public class PerfOverlay : MonoBehaviour
         List<Row> rows = ReadoutRows(new Reading
         {
             fps = window.Fps,
-            worstFrameMs = window.WorstFrameMs,
             cpuMainMs = window.CpuMainMs,
             gpuMs = window.GpuMs,
             frameTiming = frameTiming,
@@ -469,9 +468,11 @@ public class PerfOverlay : MonoBehaviour
     // --- What it says ---
 
     // A row a stat, short label left and value right, so it fits the thin column: how smoothly it runs, what a frame
-    // costs the CPU and the GPU, the worst frame of the second, how hot the phone is, the memory the app uses, and a Low
-    // Power row while that mode is on. The labels are short because the column is: a longer one would push the panel into
-    // the home title's way on an iPad. Everything else is in the log (2026-09-13).
+    // costs the CPU and the GPU, how hot the phone is, the memory the app uses, and a Low Power row while that mode is
+    // on. The labels are short because the column is: a longer one would push the panel into the home title's way on an
+    // iPad. Everything else is in the log (2026-09-13). So is the slowest frame of each second (worst_frame_ms): its
+    // row, Worst, went the same day, because a label that says what it measures doesn't fit, and without one it meant
+    // nothing.
     public static List<Row> ReadoutRows(Reading r)
     {
         var rows = new List<Row>
@@ -479,7 +480,6 @@ public class PerfOverlay : MonoBehaviour
             new Row("FPS", Fmt(r.fps, "0")),
             new Row("CPU", r.frameTiming ? Duration(r.cpuMainMs) : "off"),
             new Row("GPU", r.frameTiming ? Duration(r.gpuMs) : "off"),
-            new Row("Worst", Duration(r.worstFrameMs)),
             new Row("Heat", r.heat == DeviceStats.Thermal.Unknown ? "n/a" : HeatName(r.heat)),
             new Row("RAM", r.footprintMb >= 0 ? Memory(r.footprintMb) : "n/a"),
         };

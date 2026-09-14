@@ -63,7 +63,6 @@ file once a second.
 - `FPS 60` — frames in the last second. The app caps itself at 60, so a frame has 16.7 ms
 - `CPU 6.1 ms`, `GPU 4.4 ms` — the average time the main thread and the GPU spent on one frame. The
   rest of the 16.7 ms is headroom
-- `Worst 21 ms` — the slowest frame in the last second: a hitch shows up here
 - `Heat Nominal` — iOS's own heat level
   - It goes `Nominal` → `Fair` → `Serious` → `Critical`. From `Serious` iOS slows the phone down to
     cool it, and every frame time after that point measures a throttled phone
@@ -71,8 +70,8 @@ file once a second.
   it is in the log (`headroom_mb`)
 - `Low Power` — only there while Low Power Mode is on
 - Long times read `1.2 s` and big memory `1.4 GB`, so the column never gets wider
-- Launch and load times aren't on screen. They're in the log: the `launch` row, and each scene's
-  `first_frame` row
+- Launch and load times and the slowest frame aren't on screen. They're in the log: the `launch`
+  row, each scene's `first_frame` row, and `worst_frame_ms` on every row, where a hitch shows up
 
 ## Getting the logs to the Mac
 
