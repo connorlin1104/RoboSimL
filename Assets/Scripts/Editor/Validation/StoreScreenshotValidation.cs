@@ -5,9 +5,10 @@ using UnityEngine;
 using Object = UnityEngine.Object;
 
 // Checks the store screenshot tool's promises that hold without a Game view: a capture comes back as plain RGB — no
-// alpha channel, which App Store Connect refuses — with every pixel the colour it was captured; and the two sizes of one
-// shot share a number, one past whatever is already in the folder. The capture itself needs a Game view, so it is
-// checked by using it: Docs/App-Store-Submission.md.
+// alpha channel, which App Store Connect refuses — with every pixel the colour it was captured; the two sizes of one shot
+// share a number, one past whatever is already in the folder; and the tool can read the Game view's list of sizes,
+// which is how it uses the entries already there instead of adding its own. The capture itself needs a Game view, so
+// it is checked by using it: Docs/App-Store-Submission.md.
 //
 // Usage: Tools > RoboSim > Validate > Validate Store Screenshots, or headless
 //   Unity -batchmode -quit -projectPath . -executeMethod StoreScreenshotValidation.RunBatchValidate
@@ -25,6 +26,7 @@ public static class StoreScreenshotValidation
         var checks = new ValidationUtil.Checks();
         AlphaComesOut(checks);
         ShotNumbers(checks);
+        GameViewList(checks);
 
         if (checks.Failures.Count == 0) return $"{Title}: PASSED ({checks.Count} checks).";
         var report = new StringBuilder($"{checks.Failures.Count} of {checks.Count} checks failed:");
@@ -119,5 +121,40 @@ public static class StoreScreenshotValidation
         checks.That(phone == "iPhone-6.5-2778x1284-09.png" && pad == "iPad-13-2752x2064-09.png",
             $"shot 9 should be iPhone-6.5-2778x1284-09.png and iPad-13-2752x2064-09.png; it is {phone} and {pad}");
         Next(new[] { phone, pad }, 10, "the tool's own names, read back");
+    }
+
+    // The capture sizes the Game view through entries already in its list, found in Unity's unpublished GameViewSizes; if
+    // the list can't be read, every capture adds an entry of the tool's own, which it mustn't. So: the list reads, a size
+    // is found where the list says it is, and a size nothing has isn't found. Which entries this editor would use depends
+    // on what has been added by hand on this Mac, so that is reported, not checked.
+    private static void GameViewList(ValidationUtil.Checks checks)
+    {
+        var entries = StoreScreenshotCapture.GameViewEntries();
+        checks.That(entries.Count > 0,
+            "the Game view's list of sizes can't be read (has Unity's GameViewSizes moved?), so every capture would add an " +
+            "entry of its own");
+        if (entries.Count == 0) return;
+
+        int known = entries.FindIndex(e => e.Fixed && e.Width > 0 && e.Height > 0);
+        checks.That(known >= 0, "the Game view's list has no fixed-resolution entry to look one up by");
+        if (known >= 0)
+        {
+            int found = StoreScreenshotCapture.GameViewEntryOfSize(entries[known].Width, entries[known].Height);
+            checks.That(found >= 0 && found <= known && entries[found].Width == entries[known].Width &&
+                        entries[found].Height == entries[known].Height,
+                $"looking up {entries[known].Width}x{entries[known].Height}, entry {known}'s size ('{entries[known].Name}'), " +
+                $"found entry {found}");
+        }
+        int none = StoreScreenshotCapture.GameViewEntryOfSize(1, 1);
+        checks.That(none < 0, $"a 1x1 size, which no entry has, was found at entry {none}");
+
+        var report = new StringBuilder($"{Title}: the Game view entries a capture would use in this editor:");
+        foreach ((string Label, int Width, int Height) size in StoreScreenshotCapture.Sizes)
+        {
+            int index = StoreScreenshotCapture.GameViewEntryOfSize(size.Width, size.Height);
+            report.Append($"\n  {size.Label} {size.Width}x{size.Height}: ")
+                .Append(index >= 0 ? $"entry {index}, '{entries[index].Name}'" : "none here, so the capture adds one of its own");
+        }
+        Debug.Log(report.ToString());
     }
 }

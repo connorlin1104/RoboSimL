@@ -28,8 +28,9 @@ using Object = UnityEngine.Object;
 //   1. Freezes the game where it is. Time.timeScale 0 stops physics and everything else that runs on game time, and the
 //      home stage is held Still so its robot stops turning. A paused editor is let run on, still frozen at time scale 0,
 //      because a new size is only laid out on a frame that runs.
-//   2. For each size, sets the Game view to it and waits for the view to report that size, then for a few frames more:
-//      the canvas lays itself out again, and the home stage makes a texture the new shape and draws it. Then captures.
+//   2. For each size, picks the Game view's own entry of that size and waits for the view to report it, then for a few
+//      frames more: the canvas lays itself out again, and the home stage makes a texture the new shape and draws it.
+//      Then captures. Only a size the Game view has no entry for gets one of this tool's (ResolutionName).
 //   3. Writes each capture again as plain RGB. Unity's capture keeps an alpha channel, and App Store Connect refuses any
 //      PNG that has one — even one that is opaque everywhere.
 //   4. Puts back the Game view's size, the time scale, the stage, the performance overlay and the pause.
@@ -65,6 +66,10 @@ public static class StoreScreenshotCapture
     // view that never takes the size, a capture that is never written.
     private const double StepTimeout = 20.0;
 
+    // The one Game view entry this tool adds, and only for a size the Game view has no entry of its own for. Unity lists
+    // 2778x1284 itself (the iPhone 12 Pro Max) and an entry of 2752x2064 added by hand is used as it is, so on a set-up
+    // editor a capture leaves the list as it found it. It used to set this entry for every capture and leave it in the
+    // list (Connor, 2026-09-13: "i didn't add them").
     private const string ResolutionName = "RoboSim Store";
 
     private static Session active;
@@ -166,7 +171,7 @@ public static class StoreScreenshotCapture
         {
             sizeIndex = index;
             (string _, int w, int h) = Sizes[index];
-            PlayModeWindow.SetCustomRenderingResolution((uint)w, (uint)h, ResolutionName);
+            if (!SelectGameViewEntry(w, h)) PlayModeWindow.SetCustomRenderingResolution((uint)w, (uint)h, ResolutionName);
             Enter(Phase.Resizing);
         }
 
@@ -288,12 +293,12 @@ public static class StoreScreenshotCapture
 
         private void Restore()
         {
-            if (!RestoreGameViewSize(sizeSelection))
+            if (!SelectGameViewSize(sizeSelection) && !SelectGameViewEntry((int)width, (int)height))
             {
-                // The same pixels, under an entry of this tool's own: as good as the entry it found for everything but
-                // Free Aspect, which follows the window.
-                PlayModeWindow.SetCustomRenderingResolution(width, height, ResolutionName + " (before)");
-                Debug.Log($"[Screenshots] Left the Game view at {width}x{height}, the size it was at, under a new entry.");
+                // The same pixels, under this tool's entry: as good as the entry it found for everything but Free Aspect,
+                // which follows the window.
+                PlayModeWindow.SetCustomRenderingResolution(width, height, ResolutionName);
+                Debug.Log($"[Screenshots] Left the Game view at {width}x{height}, the size it was at, under {ResolutionName}.");
             }
             if (viewType != PlayModeWindow.PlayModeViewTypes.GameView) PlayModeWindow.SetViewType(viewType);
             Application.runInBackground = runInBackground;
@@ -406,9 +411,10 @@ public static class StoreScreenshotCapture
 
     // --- The Game view's own size entry ---
 
-    // Read and put back through reflection, because Unity doesn't publish it: that is what lets the capture restore the
-    // very entry it found, Free Aspect included, which no fixed size can stand in for. If Unity renames it, capturing
-    // still works and the view is left at the size it was at, under an entry of its own.
+    // Read and set through reflection, because Unity doesn't publish it: that is what lets the capture use the Game view's
+    // own entries and put back the very entry it found, Free Aspect included, which no fixed size can stand in for. If
+    // Unity renames it, capturing still works: each size goes through this tool's entry, and the view is left at the size
+    // it was at.
     private static int GameViewSizeIndex()
     {
         try
@@ -422,7 +428,7 @@ public static class StoreScreenshotCapture
         }
     }
 
-    private static bool RestoreGameViewSize(int index)
+    private static bool SelectGameViewSize(int index)
     {
         if (index < 0) return false;
         try
@@ -460,5 +466,57 @@ public static class StoreScreenshotCapture
                 return property;
         }
         return null;
+    }
+
+    // The Game view's entry of exactly this size, selected; false if it has none, or Unity's internals have moved.
+    private static bool SelectGameViewEntry(int width, int height)
+    {
+        int index = GameViewEntryOfSize(width, height);
+        return index >= 0 && SelectGameViewSize(index);
+    }
+
+    // Where in the Game view's list an entry of exactly this size is, or -1. The first fixed-resolution match wins: any
+    // entry of the right size renders the same pixels.
+    internal static int GameViewEntryOfSize(int width, int height)
+    {
+        foreach ((int index, bool fixedSize, int w, int h, string _) in GameViewEntries())
+            if (fixedSize && w == width && h == height) return index;
+        return -1;
+    }
+
+    // The Game view's list of sizes, in its order; empty if Unity's internals have moved. It is Unity's GameViewSizes,
+    // which isn't published either: one group per platform, Unity's own sizes first and then the ones added by hand.
+    internal static List<(int Index, bool Fixed, int Width, int Height, string Name)> GameViewEntries()
+    {
+        var entries = new List<(int Index, bool Fixed, int Width, int Height, string Name)>();
+        try
+        {
+            const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            Type sizesType = typeof(EditorWindow).Assembly.GetType("UnityEditor.GameViewSizes");
+            if (sizesType == null) return entries;
+            object sizes = typeof(ScriptableSingleton<>).MakeGenericType(sizesType)
+                .GetProperty("instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+            object group = sizes == null ? null : sizesType.GetProperty("currentGroup", any)?.GetValue(sizes);
+            if (group == null) return entries;
+            MethodInfo count = group.GetType().GetMethod("GetTotalCount", any, null, Type.EmptyTypes, null);
+            MethodInfo get = group.GetType().GetMethod("GetGameViewSize", any, null, new[] { typeof(int) }, null);
+            if (count == null || get == null) return entries;
+            int total = (int)count.Invoke(group, null);
+            for (int i = 0; i < total; i++)
+            {
+                object size = get.Invoke(group, new object[] { i });
+                Type type = size.GetType();
+                entries.Add((i,
+                    Convert.ToString(type.GetProperty("sizeType", any)?.GetValue(size)) == "FixedResolution",
+                    type.GetProperty("width", any)?.GetValue(size) is int w ? w : -1,
+                    type.GetProperty("height", any)?.GetValue(size) is int h ? h : -1,
+                    Convert.ToString(type.GetProperty("baseText", any)?.GetValue(size))));
+            }
+        }
+        catch (Exception)
+        {
+            entries.Clear();
+        }
+        return entries;
     }
 }

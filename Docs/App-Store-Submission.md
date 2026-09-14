@@ -238,6 +238,9 @@ Landscape only (the app is landscape-locked).
 2. Press **Cmd+Shift+S** (or **Tools -> RoboSim -> Utilities -> Capture Store Screenshots**)
    - It sets the Game view to 2778 x 1284, captures, sets it to 2752 x 2064, captures, then puts the
      Game view back the way it found it
+   - It uses the Game view's own entries of those sizes: Unity's `iPhone 12 Pro Max` for 2778 x 1284,
+     and one you add yourself for 2752 x 2064 (the Game view's size menu ▸ +). Only a size with no
+     entry gets one of the tool's, `RoboSim Store`
    - Game time stands still while it works and the home stage holds its robot still, so both files
      are the same moment
    - The performance readout is hidden while it captures
@@ -252,8 +255,8 @@ Landscape only (the app is landscape-locked).
 - Saved as plain RGB with no alpha channel — App Store Connect refuses a PNG that has one
 - It stops and says so if a capture comes out the wrong size. The fix is the Game view's Scale slider:
   1x or lower (above 1x Unity renders at the window's size, not the target's)
-- `Validate Store Screenshots` checks the alpha comes out and the numbering; the capture itself is
-  checked by using it
+- `Validate Store Screenshots` checks the alpha comes out, the numbering, and that the tool can read
+  the Game view's list of sizes; the capture itself is checked by using it
 - Why this is valid, not a shortcut:
   - Nothing reads `Screen.safeArea`, and the UI is one `ScaleWithScreenSize` canvas
     (1920x1080 ref, match 0.5) — layout is a pure function of render resolution
