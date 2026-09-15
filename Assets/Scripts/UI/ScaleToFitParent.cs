@@ -34,7 +34,9 @@ public class ScaleToFitParent : MonoBehaviour
     // the panel it belongs to is shown for the first time.
     void OnRectTransformDimensionsChange() => Apply();
 
-    private void Apply()
+    // Public so ControllerConfigLayoutValidation can lay the diagram out in edit mode, where
+    // OnRectTransformDimensionsChange never arrives.
+    public void Apply()
     {
         if (target == null) return;
         // This message can arrive before Awake on the frame the object is created.

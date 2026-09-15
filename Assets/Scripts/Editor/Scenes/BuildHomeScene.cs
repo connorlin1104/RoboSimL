@@ -52,7 +52,7 @@ public class BuildHomeScene
     // A version stamp turns "did I remember to add a check for this?" — a judgement call that has
     // to be made correctly every time — into a one-line bump. It is also the ONLY thing that can
     // catch a change with no object footprint at all, which an added component is.
-    internal const string HomeSceneStamp = "HomeSceneStamp_v10";
+    internal const string HomeSceneStamp = "HomeSceneStamp_v11";
 
     // The theme, derived from the app icon (Assets/Icons/AppIcon.png) rather than invented.
     //
@@ -164,6 +164,17 @@ public class BuildHomeScene
     // "new Color(TextColor.r, TextColor.g, TextColor.b, 0.62f)" at six separate call sites.
     internal static readonly Color TextMutedColor =
         new Color(TextColor.r, TextColor.g, TextColor.b, 0.62f);
+
+    // Behind a dialog. Dimmed rather than opaque: the home screen stays recognisable behind it, so the
+    // dialog reads as something on top of the app instead of a screen the app has moved to.
+    private static readonly Color DimColor =
+        new Color(BackgroundTopColor.r, BackgroundTopColor.g, BackgroundTopColor.b, 0.86f);
+
+    // What a Configure Controller button drives, written beside it. Halfway between SelectedColor (the
+    // tint on a button with something assigned) and TextColor, so it reads as belonging to that button
+    // and stays legible at a phone's size. AccentColor, which it replaced, is a dark blue that all but
+    // vanished against the diagram's ListColor.
+    private static readonly Color ConfigCaptionColor = new Color32(0x80, 0xCD, 0xF4, 0xFF);
 
     [MenuItem("Tools/RoboSim/Scenes/Build Home Screen", false, 1)]
     private static void BuildInteractive()
@@ -347,6 +358,11 @@ public class BuildHomeScene
         // The config screen's Back / Control Style / Reset row now lives in a layout group so it
         // stays centred whatever subset of it is showing. No serialized ref, so check the object.
         if (FindDescendantRect(scene, "ConfigBottomRow") == null) return false;
+        // The assignment popup sits on a dim that covers the screen, and its rows carry a second line for
+        // the control-style choice. Neither has a serialized ref of its own (the screen's assignmentPanel
+        // ref points at whatever object it is given), so check the objects.
+        if (FindDescendantRect(scene, "AssignmentOverlay") == null) return false;
+        if (FindDescendantRect(scene, ControllerConfigScreen.RowDetailName) == null) return false;
         // The model picker is two columns now; the split has no serialized ref of its own.
         if (FindDescendantRect(scene, "ModelListSplit") == null) return false;
         // Each column scrolls inside its own viewport rather than growing the whole Robot page. The
@@ -1453,7 +1469,7 @@ public class BuildHomeScene
         // something on top of the app instead of a screen the app has moved to. raycastTarget stays
         // true, which is what stops a tap landing on Drive through the dim.
         Image scrim = overlay.AddComponent<Image>();
-        scrim.color = new Color(BackgroundTopColor.r, BackgroundTopColor.g, BackgroundTopColor.b, 0.86f);
+        scrim.color = DimColor;
         scrim.raycastTarget = true;
         parts.overlay = overlay;
 
@@ -1521,7 +1537,7 @@ public class BuildHomeScene
         public GameObject emptyState;
         public Button[] buttons = new Button[ControllerMapSettings.ButtonCount];
         public TextMeshProUGUI[] captions = new TextMeshProUGUI[ControllerMapSettings.ButtonCount];
-        public GameObject assignmentPanel;
+        public GameObject assignmentPanel; // the dim with the popup on it: what the screen shows and hides
         public TextMeshProUGUI assignmentHeader;
         public Transform assignmentList;
         public Button rowTemplate;
@@ -1532,9 +1548,9 @@ public class BuildHomeScene
         public Button backButton;
     }
 
-    // Near-fullscreen panel showing a stylized controller: 12 tappable buttons laid out like
-    // the drive scene's on-screen controller (shoulders top corners, arrow + XBAY diamonds in
-    // the middle, decorative stick circles below), each with an assignment caption beneath it.
+    // Near-fullscreen panel showing a stylized controller: 12 tappable buttons laid out like a V5
+    // controller (shoulders in the top corners, the sticks between them, the arrow and XBAY
+    // diamonds below), each with a caption beside it naming what it drives.
     // Tapping a button opens the assignment popup; ControllerConfigScreen drives the logic.
     private static ControllerConfigParts BuildControllerConfigPanel(Transform canvas)
     {
@@ -1547,6 +1563,7 @@ public class BuildHomeScene
 
         parts.header = CreateText("ConfigHeader", panel.transform, "Controller", 48f);
         parts.header.fontStyle = FontStyles.Bold;
+        NeverWrap(parts.header, 32f); // a long robot name shrinks the title instead of wrapping it
         RectTransform headerRect = parts.header.rectTransform;
         headerRect.anchorMin = headerRect.anchorMax = new Vector2(0.5f, 1f);
         headerRect.pivot = new Vector2(0.5f, 1f);
@@ -1591,41 +1608,54 @@ public class BuildHomeScene
         diagramImage.type = Image.Type.Sliced;
         diagramImage.color = ListColor;
 
-        AddDecorativeStick(diagram.transform, "LeftStickMarker", new Vector2(-450f, -180f));
-        AddDecorativeStick(diagram.transform, "RightStickMarker", new Vector2(450f, -180f));
+        // The sticks sit between the shoulder buttons, above the two diamonds, as they do on a V5
+        // controller. Decorative: the drive is always on them.
+        AddDecorativeStick(diagram.transform, "LeftStickMarker", new Vector2(-150f, 260f));
+        AddDecorativeStick(diagram.transform, "RightStickMarker", new Vector2(150f, 260f));
 
+        // Every button's caption has a box of its own that no other button or caption reaches into, so
+        // what a button drives is never drawn under the next button. Every caption used to hang BELOW
+        // its button, and that is exactly what happened: R1's second line went under R2, and a two-line
+        // caption under Up ran into Left and Right.
+        //   Shoulders: beside the pill, on the side facing the middle, where the diagram is empty.
+        //   Diamonds: on the side facing AWAY from the diamond's centre (Up above, Down below, Left to
+        //   the left, Right to the right), which is empty by construction. The two diamonds sit far
+        //   enough apart that Right's caption and Y's, which both face the gap between them, fit side
+        //   by side.
+        // ControllerConfigLayoutValidation holds all of it at both store sizes.
         // ControllerButton order: L1 L2 R1 R2 | Up Down Left Right | X B A Y.
         Vector2 pillSize = new Vector2(170f, 70f);
-        parts.buttons[0] = CreateConfigButton(diagram.transform, "CfgL1", "L1",
-            new Vector2(-600f, 250f), pillSize, false, out parts.captions[0]);
-        parts.buttons[1] = CreateConfigButton(diagram.transform, "CfgL2", "L2",
-            new Vector2(-600f, 130f), pillSize, false, out parts.captions[1]);
-        parts.buttons[2] = CreateConfigButton(diagram.transform, "CfgR1", "R1",
-            new Vector2(600f, 250f), pillSize, false, out parts.captions[2]);
-        parts.buttons[3] = CreateConfigButton(diagram.transform, "CfgR2", "R2",
-            new Vector2(600f, 130f), pillSize, false, out parts.captions[3]);
+        parts.buttons[0] = CreateConfigButton(diagram.transform, "CfgL1", "L1", new Vector2(-620f, 300f),
+            pillSize, false, CaptionSide.Right, out parts.captions[0]);
+        parts.buttons[1] = CreateConfigButton(diagram.transform, "CfgL2", "L2", new Vector2(-620f, 200f),
+            pillSize, false, CaptionSide.Right, out parts.captions[1]);
+        parts.buttons[2] = CreateConfigButton(diagram.transform, "CfgR1", "R1", new Vector2(620f, 300f),
+            pillSize, false, CaptionSide.Left, out parts.captions[2]);
+        parts.buttons[3] = CreateConfigButton(diagram.transform, "CfgR2", "R2", new Vector2(620f, 200f),
+            pillSize, false, CaptionSide.Left, out parts.captions[3]);
 
-        // Diamond centers sit +-260 from the panel center: far enough apart that the two
-        // inner buttons' 220px-wide assignment captions (CfgRight at x-140, CfgY at x+140)
-        // never overlap each other.
+        // The d-pad draws the field's arrow glyph rather than the words, which filled its circles
+        // ("Down" took 81% of one). The glyph points down, so Up is a half turn.
         Vector2 roundSize = new Vector2(76f, 76f);
-        parts.buttons[4] = CreateConfigButton(diagram.transform, "CfgUp", "Up",
-            new Vector2(-260f, 180f), roundSize, true, out parts.captions[4]);
-        parts.buttons[5] = CreateConfigButton(diagram.transform, "CfgDown", "Down",
-            new Vector2(-260f, -60f), roundSize, true, out parts.captions[5]);
-        parts.buttons[6] = CreateConfigButton(diagram.transform, "CfgLeft", "Left",
-            new Vector2(-380f, 60f), roundSize, true, out parts.captions[6]);
-        parts.buttons[7] = CreateConfigButton(diagram.transform, "CfgRight", "Right",
-            new Vector2(-140f, 60f), roundSize, true, out parts.captions[7]);
+        Vector2 dPad = new Vector2(-384f, -100f), face = new Vector2(384f, -100f);
+        const float spread = 110f;
+        parts.buttons[4] = CreateConfigButton(diagram.transform, "CfgUp", null, dPad + new Vector2(0f, spread),
+            roundSize, true, CaptionSide.Above, out parts.captions[4], 180f);
+        parts.buttons[5] = CreateConfigButton(diagram.transform, "CfgDown", null, dPad + new Vector2(0f, -spread),
+            roundSize, true, CaptionSide.Below, out parts.captions[5], 0f);
+        parts.buttons[6] = CreateConfigButton(diagram.transform, "CfgLeft", null, dPad + new Vector2(-spread, 0f),
+            roundSize, true, CaptionSide.Left, out parts.captions[6], -90f);
+        parts.buttons[7] = CreateConfigButton(diagram.transform, "CfgRight", null, dPad + new Vector2(spread, 0f),
+            roundSize, true, CaptionSide.Right, out parts.captions[7], 90f);
 
-        parts.buttons[8] = CreateConfigButton(diagram.transform, "CfgX", "X",
-            new Vector2(260f, 180f), roundSize, true, out parts.captions[8]);
-        parts.buttons[9] = CreateConfigButton(diagram.transform, "CfgB", "B",
-            new Vector2(380f, 60f), roundSize, true, out parts.captions[9]);
-        parts.buttons[10] = CreateConfigButton(diagram.transform, "CfgA", "A",
-            new Vector2(260f, -60f), roundSize, true, out parts.captions[10]);
-        parts.buttons[11] = CreateConfigButton(diagram.transform, "CfgY", "Y",
-            new Vector2(140f, 60f), roundSize, true, out parts.captions[11]);
+        parts.buttons[8] = CreateConfigButton(diagram.transform, "CfgX", "X", face + new Vector2(0f, spread),
+            roundSize, true, CaptionSide.Above, out parts.captions[8]);
+        parts.buttons[9] = CreateConfigButton(diagram.transform, "CfgB", "B", face + new Vector2(spread, 0f),
+            roundSize, true, CaptionSide.Right, out parts.captions[9]);
+        parts.buttons[10] = CreateConfigButton(diagram.transform, "CfgA", "A", face + new Vector2(0f, -spread),
+            roundSize, true, CaptionSide.Below, out parts.captions[10]);
+        parts.buttons[11] = CreateConfigButton(diagram.transform, "CfgY", "Y", face + new Vector2(-spread, 0f),
+            roundSize, true, CaptionSide.Left, out parts.captions[11]);
 
         // Bottom row: Back | Control Style | Reset to Default, inside a layout group.
         //
@@ -1674,15 +1704,54 @@ public class BuildHomeScene
             "Reset to Default", 32f, NeutralColor);
         ((RectTransform)parts.resetDefaultsButton.transform).sizeDelta = new Vector2(300f, 64f);
 
-        // Assignment popup: header + scrollable option list + Clear/Cancel. Scrolls because a
+        // Assignment popup: header + scrollable option list + Clear/Done. Scrolls because a
         // many-motor robot yields two rows per motor.
-        GameObject assignmentPanel = CreatePanel("AssignmentPanel", panel.transform, new Vector2(720f, 780f));
-        AddVerticalLayout(assignmentPanel, 32, 16f);
-        parts.assignmentPanel = assignmentPanel;
+        //
+        // It sits on a dim that covers the whole screen, and the DIM is what the screen shows and hides
+        // (the assignmentPanel ref), so the two can't be out of step. The dim also takes every tap
+        // outside the popup: one landing on the diagram behind would open another button's popup
+        // underneath this one.
+        GameObject overlay = CreateUIObject("AssignmentOverlay", panel.transform);
+        RectTransform overlayRect = (RectTransform)overlay.transform;
+        overlayRect.anchorMin = Vector2.zero;
+        overlayRect.anchorMax = Vector2.one;
+        // The panel is inset StageMargin from the canvas (FillParent above); reaching back out by the
+        // same amount covers the canvas.
+        overlayRect.offsetMin = new Vector2(-StageMargin, -StageMargin);
+        overlayRect.offsetMax = new Vector2(StageMargin, StageMargin);
+        Image dim = overlay.AddComponent<Image>();
+        dim.color = DimColor;
+        dim.raycastTarget = true;
+        parts.assignmentPanel = overlay;
+
+        // The popup lives in the band between the title and the bottom row and is never taller than it.
+        // At a fixed 780 it was taller than a 6.5" phone leaves (the canvas there is 979 units, the
+        // panel 899), so it cut through the title and the Back / Control Style / Reset row showed
+        // half-hidden beneath it. The band's layout group gives it min(780, the band), centred.
+        float headerBottom = -headerRect.anchoredPosition.y + headerRect.sizeDelta.y;
+        GameObject band = CreateUIObject("AssignmentBand", overlay.transform);
+        RectTransform bandRect = (RectTransform)band.transform;
+        bandRect.anchorMin = Vector2.zero;
+        bandRect.anchorMax = Vector2.one;
+        bandRect.offsetMin = new Vector2(0f, StageMargin + BottomRowInset + BottomRowHeight + PopupGap);
+        bandRect.offsetMax = new Vector2(0f, -(StageMargin + headerBottom + PopupGap));
+        VerticalLayoutGroup bandLayout = band.AddComponent<VerticalLayoutGroup>();
+        bandLayout.childAlignment = TextAnchor.MiddleCenter;
+        bandLayout.childControlWidth = false; // the popup keeps its own width...
+        bandLayout.childControlHeight = true; // ...and takes its height from the LayoutElement below
+        bandLayout.childForceExpandWidth = false;
+        bandLayout.childForceExpandHeight = false;
+
+        GameObject assignmentPanel = CreatePanel("AssignmentPanel", band.transform, new Vector2(720f, 780f));
+        LayoutElement popupHeight = assignmentPanel.AddComponent<LayoutElement>();
+        popupHeight.minHeight = 0f;
+        popupHeight.preferredHeight = 780f;
+        popupHeight.flexibleHeight = 0f;
+        AddVerticalLayout(assignmentPanel, 28, 14f);
 
         parts.assignmentHeader = CreateText("AssignmentHeader", assignmentPanel.transform, "Assign", 40f);
         parts.assignmentHeader.fontStyle = FontStyles.Bold;
-        SetLayoutHeight(parts.assignmentHeader.gameObject, 56f);
+        SetLayoutHeight(parts.assignmentHeader.gameObject, 52f);
 
         GameObject scroll = CreateUIObject("AssignmentScroll", assignmentPanel.transform);
         Image scrollImage = scroll.AddComponent<Image>(); // list backdrop + drag-catcher
@@ -1711,25 +1780,67 @@ public class BuildHomeScene
         scrollRect.viewport = (RectTransform)scroll.transform;
         parts.assignmentList = list.transform;
 
+        // One line for an assignment row ("Cascade Lift — Forward (hold)"), two for a control-style
+        // row: the mechanism, then the choice in smaller, muted text beneath it. A layout group sizes
+        // the row from the lines that are showing, so a row is never told how tall to be. Neither line
+        // wraps: a name too long for the row shrinks, then ends in an ellipsis, instead of spilling out
+        // of it, which is what the one-line style rows did ("Scoring Intake — 2 buttons (hold fwd /
+        // rev)" wrapped to two lines in a row with room for one).
         parts.rowTemplate = CreateButton("AssignmentRowTemplate", list.transform,
             "Mechanism — Forward", 32f, NeutralColor);
-        SetLayoutHeight(parts.rowTemplate.gameObject, 64f);
+        VerticalLayoutGroup rowLines = parts.rowTemplate.gameObject.AddComponent<VerticalLayoutGroup>();
+        rowLines.padding = new RectOffset(16, 16, 8, 8);
+        rowLines.childAlignment = TextAnchor.MiddleCenter;
+        rowLines.childControlWidth = true;
+        rowLines.childControlHeight = true;
+        rowLines.childForceExpandWidth = true;
+        rowLines.childForceExpandHeight = false;
+        TextMeshProUGUI rowLabel = parts.rowTemplate.GetComponentInChildren<TextMeshProUGUI>(true);
+        NeverWrap(rowLabel, 22f);
+        SetLayoutHeight(rowLabel.gameObject, 48f);
+        TextMeshProUGUI rowDetail = CreateText(ControllerConfigScreen.RowDetailName, parts.rowTemplate.transform,
+            "2 buttons (hold fwd / rev)", 24f);
+        rowDetail.color = TextMutedColor;
+        rowDetail.raycastTarget = false;
+        NeverWrap(rowDetail, 18f);
+        SetLayoutHeight(rowDetail.gameObject, 30f);
         parts.rowTemplate.gameObject.SetActive(false); // template stays inactive; screen clones it
 
         parts.clearButton = CreateButton("ClearButton", assignmentPanel.transform,
             "Clear Assignment", 36f, NeutralColor);
-        SetLayoutHeight(parts.clearButton.gameObject, 72f);
-        parts.cancelButton = CreateButton("CancelButton", assignmentPanel.transform, "Cancel", 36f, AccentColor);
-        SetLayoutHeight(parts.cancelButton.gameObject, 72f);
+        SetLayoutHeight(parts.clearButton.gameObject, 64f);
+        // "Done", not "Cancel": every tap in the popup saves at once, so this only closes it, and
+        // "Cancel" read as "throw my changes away". (ControllerConfigScreen.Awake still relabels a scene
+        // built before this.)
+        parts.cancelButton = CreateButton("CancelButton", assignmentPanel.transform, "Done", 36f, AccentColor);
+        SetLayoutHeight(parts.cancelButton.gameObject, 64f);
 
-        assignmentPanel.SetActive(false);
+        overlay.SetActive(false);
         panel.SetActive(false); // ControllerConfigScreen.Open shows it
         return parts;
     }
 
-    // Diagram button + the assignment caption below it (a sibling, so button tints don't dim it).
-    private static Button CreateConfigButton(Transform parent, string name, string label,
-        Vector2 position, Vector2 size, bool round, out TextMeshProUGUI caption)
+    // Where a diagram button's caption goes, relative to the button.
+    private enum CaptionSide { Above, Below, Left, Right }
+
+    // A caption's box: three lines at CaptionSize (ControllerConfigScreen.MaxCaptionLines; past that they
+    // fold into "+N"), wide enough for a two-word mechanism name and its mode tag.
+    private const float CaptionSize = 22f;
+    private const float CaptionMinSize = 16f;
+    private const float CaptionBoxHeight = 86f;
+    private const float ShoulderCaptionWidth = 230f;
+    private const float DiamondCaptionWidth = 220f;
+    private const float CaptionGap = 10f;
+    private const float ArrowGlyphSize = 36f;
+
+    // Between the assignment popup and the title above it, and the bottom row below it.
+    private const float PopupGap = 16f;
+
+    // Diagram button + the caption naming what it drives (a sibling, so button tints don't dim it), in a
+    // box on the given side. A null label draws the d-pad's arrow glyph instead, rolled by arrowRoll
+    // degrees (the glyph points down).
+    private static Button CreateConfigButton(Transform parent, string name, string label, Vector2 position,
+        Vector2 size, bool round, CaptionSide side, out TextMeshProUGUI caption, float arrowRoll = 0f)
     {
         GameObject go = CreateUIObject(name, parent);
         RectTransform rect = (RectTransform)go.transform;
@@ -1752,32 +1863,79 @@ public class BuildHomeScene
         Button button = go.AddComponent<Button>();
         button.targetGraphic = image;
 
-        TextMeshProUGUI text = CreateText("Label", go.transform, label, round ? 22f : 32f);
-        text.fontStyle = FontStyles.Bold;
-        text.raycastTarget = false;
-        RectTransform textRect = text.rectTransform;
-        textRect.anchorMin = Vector2.zero;
-        textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = Vector2.zero;
-        textRect.offsetMax = Vector2.zero;
+        if (label != null)
+        {
+            TextMeshProUGUI text = CreateText("Label", go.transform, label, round ? 22f : 32f);
+            text.fontStyle = FontStyles.Bold;
+            text.raycastTarget = false;
+            RectTransform textRect = text.rectTransform;
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = Vector2.zero;
+            textRect.offsetMax = Vector2.zero;
+        }
+        else
+        {
+            // The white arrow the field's d-pad draws (BuildDriveControls.EnsureArrowGlyph), so the two
+            // screens show the same control the same way.
+            GameObject glyph = CreateUIObject("Arrow", go.transform);
+            RectTransform glyphRect = (RectTransform)glyph.transform;
+            glyphRect.anchorMin = glyphRect.anchorMax = new Vector2(0.5f, 0.5f);
+            glyphRect.pivot = new Vector2(0.5f, 0.5f);
+            glyphRect.anchoredPosition = Vector2.zero;
+            glyphRect.sizeDelta = new Vector2(ArrowGlyphSize, ArrowGlyphSize);
+            glyphRect.localRotation = Quaternion.Euler(0f, 0f, arrowRoll);
+            Image arrow = glyph.AddComponent<Image>();
+            arrow.sprite = HomeThemeSprites.Arrow;
+            arrow.color = TextColor;
+            arrow.raycastTarget = false;
+        }
 
-        // A button can drive several mechanisms at once, and the caption lists them one per line — so
-        // it's anchored by its TOP edge and given room for three lines. Growing downward rather than
-        // wider is deliberate: the 220 width was tuned so the two inner diamond captions (CfgRight at
-        // x=-140 and CfgY at x=+140) don't collide, and widening would put them back on top of each
-        // other. Anything past three lines folds into a "+N" tail (see ControllerConfigScreen).
-        const float captionLine = 26f;
-        const float captionLines = 3f;
-        caption = CreateText(name + "_Assign", parent, string.Empty, 20f);
-        caption.color = AccentColor;
+        // One function per line, hugging the button on its side. Lines never wrap: one too long for the
+        // box shrinks the caption (down to CaptionMinSize), and past that ends in an ellipsis.
+        caption = CreateText(name + "_Assign", parent, string.Empty, CaptionSize);
+        caption.color = ConfigCaptionColor;
         caption.raycastTarget = false;
-        caption.verticalAlignment = VerticalAlignmentOptions.Top;
+        NeverWrap(caption, CaptionMinSize);
         RectTransform captionRect = caption.rectTransform;
         captionRect.anchorMin = captionRect.anchorMax = new Vector2(0.5f, 0.5f);
-        captionRect.pivot = new Vector2(0.5f, 1f); // top-anchored: extra lines hang downward
-        captionRect.anchoredPosition = new Vector2(position.x, position.y - size.y * 0.5f - 9f);
-        captionRect.sizeDelta = new Vector2(220f, captionLine * captionLines);
+        Vector2 half = size * 0.5f;
+        switch (side)
+        {
+            case CaptionSide.Above:
+                captionRect.pivot = new Vector2(0.5f, 0f);
+                captionRect.anchoredPosition = position + new Vector2(0f, half.y + CaptionGap);
+                caption.alignment = TextAlignmentOptions.Bottom;
+                break;
+            case CaptionSide.Below:
+                captionRect.pivot = new Vector2(0.5f, 1f);
+                captionRect.anchoredPosition = position - new Vector2(0f, half.y + CaptionGap);
+                caption.alignment = TextAlignmentOptions.Top;
+                break;
+            case CaptionSide.Left:
+                captionRect.pivot = new Vector2(1f, 0.5f);
+                captionRect.anchoredPosition = position - new Vector2(half.x + CaptionGap, 0f);
+                caption.alignment = TextAlignmentOptions.Right;
+                break;
+            default:
+                captionRect.pivot = new Vector2(0f, 0.5f);
+                captionRect.anchoredPosition = position + new Vector2(half.x + CaptionGap, 0f);
+                caption.alignment = TextAlignmentOptions.Left;
+                break;
+        }
+        captionRect.sizeDelta = new Vector2(round ? DiamondCaptionWidth : ShoulderCaptionWidth, CaptionBoxHeight);
         return button;
+    }
+
+    // Lines never wrap: text too big for its box shrinks down to minSize, and past that ends in an
+    // ellipsis, rather than wrapping onto a line the box has no room for.
+    private static void NeverWrap(TextMeshProUGUI text, float minSize)
+    {
+        text.textWrappingMode = TextWrappingModes.NoWrap;
+        text.enableAutoSizing = true;
+        text.fontSizeMin = minSize;
+        text.fontSizeMax = text.fontSize;
+        text.overflowMode = TextOverflowModes.Ellipsis;
     }
 
     private static void AddDecorativeStick(Transform parent, string name, Vector2 position)

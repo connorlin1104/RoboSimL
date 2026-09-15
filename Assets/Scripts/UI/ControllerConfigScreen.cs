@@ -20,12 +20,16 @@ using UnityEngine.UI;
 // The mechanism list comes from the catalog entry's metadata (written by the URDF
 // post-processor), so no field-scene loading is needed here. Robots without mechanisms — like
 // the built-in drivetrain — get an explanatory empty state; their buttons still open the popup
-// (with only Clear/Cancel) so the flow is discoverable.
+// (with only Clear/Done) so the flow is discoverable.
 //
 // Usage: built and fully wired (panel, 12 diagram buttons + captions in ControllerButton
 // order, assignment popup) by the Build Home Screen tool. HomeScreenController opens/closes it.
 public class ControllerConfigScreen : MonoBehaviour
 {
+    // The popup row template's second line, found by name. BuildHomeScene makes it and HomeSceneIsValid
+    // checks for it, both through this const, so the three can't disagree on what it is called.
+    public const string RowDetailName = "RowDetail";
+
     [Header("Data")]
     [SerializeField] private RobotModelCatalog catalog;
 
@@ -39,6 +43,8 @@ public class ControllerConfigScreen : MonoBehaviour
     [SerializeField] private TMP_Text[] assignmentLabels = new TMP_Text[ControllerMapSettings.ButtonCount];
 
     [Header("Assignment Popup")]
+    [Tooltip("The popup together with the dim behind it, shown and hidden as one so the two can never " +
+             "be out of step.")]
     [SerializeField] private GameObject assignmentPanel;
     [SerializeField] private TMP_Text assignmentHeader;
     [SerializeField] private Transform assignmentListParent;
@@ -100,41 +106,62 @@ public class ControllerConfigScreen : MonoBehaviour
     public void Open()
     {
         RobotModelCatalog.Entry entry = null;
-        robotId = catalog != null ? catalog.SelectedModelId : null;
-        if (catalog != null && !string.IsNullOrEmpty(robotId))
+        string id = catalog != null ? catalog.SelectedModelId : null;
+        if (catalog != null && !string.IsNullOrEmpty(id))
         {
             // VisibleModels, not models: a private robot's mechanism list would otherwise leak here
             // even though it isn't listed in the picker.
             foreach (RobotModelCatalog.Entry candidate in catalog.VisibleModels)
             {
-                if (candidate.id == robotId) { entry = candidate; break; }
+                if (candidate.id == id) { entry = candidate; break; }
             }
         }
-        robotDisplayName = entry != null ? entry.displayName : "No Robot";
-        mechanisms = entry != null && entry.mechanisms != null
-            ? entry.mechanisms
-            : new List<RobotModelCatalog.MechanismInfo>();
-
-        currentEntry = entry;
         // Belt and braces: the home screen already seeds at Start, but this screen is the one place
         // a player looks when the controller seems unbound, so it must not be the one place that
         // shows an empty diagram because seeding was somehow skipped.
         ControllerMapSettings.SeedDefault(entry);
 
-        map = ControllerMapSettings.Load(robotId);
+        Bind(id, entry, ControllerMapSettings.Load(id));
         PruneStaleAssignments();
+        Show();
+    }
 
+    // What Open shows, for a robot and a layout handed in rather than read from this device, and without
+    // Open's writes (seeding a default, pruning stale assignments). Public so
+    // ControllerConfigLayoutValidation can lay out the real screen for any robot and any layout, in edit
+    // mode, and leave PlayerPrefs alone.
+    public void ShowForLayoutCheck(RobotModelCatalog.Entry entry, ButtonMap buttonMap)
+    {
+        Bind(entry != null ? entry.id : null, entry, buttonMap ?? new ButtonMap());
+        Show();
+    }
+
+    private void Bind(string id, RobotModelCatalog.Entry entry, ButtonMap buttonMap)
+    {
+        robotId = id;
+        currentEntry = entry;
+        robotDisplayName = entry != null ? entry.displayName : "No Robot";
+        mechanisms = entry != null && entry.mechanisms != null
+            ? entry.mechanisms
+            : new List<RobotModelCatalog.MechanismInfo>();
+        map = buttonMap;
+    }
+
+    private void Show()
+    {
         if (headerLabel != null) headerLabel.text = $"Controller — {robotDisplayName}";
         if (emptyStateLabel != null) emptyStateLabel.SetActive(mechanisms.Count == 0);
         // Style switching needs mechanisms to act on, so hide the entry point when there are none.
         if (controlStyleButton != null) controlStyleButton.gameObject.SetActive(mechanisms.Count > 0);
         // Same rule for Reset: offering to restore a layout that doesn't exist would just look broken.
         if (resetDefaultsButton != null)
-            resetDefaultsButton.gameObject.SetActive(entry != null && entry.HasDefaultButtonMap);
-        RefreshAllButtons();
+            resetDefaultsButton.gameObject.SetActive(currentEntry != null && currentEntry.HasDefaultButtonMap);
 
         CloseAssignmentPopup(); // a popup left open from a previous robot must not carry over
         if (panel != null) panel.SetActive(true);
+        // After the panel is up: each caption measures its lines against its box (FitCaptionLine), and a
+        // text that has never been active has not set itself up to be measured.
+        RefreshAllButtons();
 
         // The two SetActives above happen while the panel is still inactive, so the bottom row's
         // HorizontalLayoutGroup — which is what keeps Back centred whatever subset of the row is
@@ -157,7 +184,10 @@ public class ControllerConfigScreen : MonoBehaviour
 
     // --- Assignment popup ---
 
-    private void OnDiagramButtonPressed(int index)
+    // The diagram buttons' click handler. Public, like OnControlStylePressed, so
+    // ControllerConfigLayoutValidation can open the popup in edit mode, where Awake never wires the
+    // listeners.
+    public void OnDiagramButtonPressed(int index)
     {
         if (assignmentPanel == null || assignmentRowTemplate == null || assignmentListParent == null) return;
         popupMode = PopupMode.Assign;
@@ -171,7 +201,7 @@ public class ControllerConfigScreen : MonoBehaviour
     // Opens the same popup listing mechanisms instead of button functions. pendingButtonIndex is
     // cleared because there IS no pending button here — OnClearPressed would otherwise wipe
     // whichever button happened to be open last.
-    private void OnControlStylePressed()
+    public void OnControlStylePressed()
     {
         if (assignmentPanel == null || assignmentRowTemplate == null || assignmentListParent == null) return;
         popupMode = PopupMode.Style;
@@ -184,7 +214,13 @@ public class ControllerConfigScreen : MonoBehaviour
 
     private void PopulateRows()
     {
-        foreach (GameObject row in spawnedRows) Destroy(row);
+        // DestroyImmediate outside Play: the layout validator opens these popups in edit mode, which
+        // refuses Destroy.
+        foreach (GameObject row in spawnedRows)
+        {
+            if (Application.isPlaying) Destroy(row);
+            else DestroyImmediate(row);
+        }
         spawnedRows.Clear();
         if (popupMode == PopupMode.Style) PopulateStyleRows();
         else PopulateAssignmentRows();
@@ -204,7 +240,7 @@ public class ControllerConfigScreen : MonoBehaviour
             string style = ControllerMapSettings.GetStyle(map, mechanism.id, mechanism.type);
             foreach (string mode in ControllerMapSettings.ModesFor(mechanism.type, style))
             {
-                AddRow($"{NameOf(mechanism)} — {FunctionLabel(mode)}",
+                AddRow($"{NameOf(mechanism)} — {FunctionLabel(mode)}", null,
                     mechanism.id + "_" + mode,
                     ControllerMapSettings.HasAssignment(map, button, mechanism.id, mode),
                     () => OnAssignmentRowToggled(mechanism.id, mode));
@@ -221,24 +257,43 @@ public class ControllerConfigScreen : MonoBehaviour
         {
             if (mechanism == null || string.IsNullOrEmpty(mechanism.id)) continue;
             string style = ControllerMapSettings.GetStyle(map, mechanism.id, mechanism.type);
-            // A style row is a "tap to switch" action, not a selected state, so it never tints.
-            AddRow($"{NameOf(mechanism)} — {StyleLabel(mechanism.type, style)}",
+            // A style row is a "tap to switch" action, not a selected state, so it never tints. Two
+            // lines, the mechanism and then its style: as one line the pair was too long for the row
+            // and wrapped out of it ("Scoring Intake — 2 buttons (hold fwd / rev)").
+            AddRow(NameOf(mechanism), StyleLabel(mechanism.type, style),
                 mechanism.id + "_style", false,
                 () => OnStyleRowToggled(mechanism.id, mechanism.type, style));
         }
     }
 
     // Clones the row template, filling it green when this function is already on the pending button.
+    // detail, when there is one, goes on a second, smaller line under the label.
     //
     // The mark used to be a "✓ " prefix on the label — but the project font (LiberationSans SDF, 250
     // glyphs) has no U+2713 and TMP Settings defines no fallback, so it rendered as the missing-glyph
     // box: the "white box next to it". Tinting the row is both unambiguous and font-proof.
-    private void AddRow(string label, string idSuffix, bool selected, UnityEngine.Events.UnityAction onClick)
+    private void AddRow(string label, string detail, string idSuffix, bool selected,
+        UnityEngine.Events.UnityAction onClick)
     {
         Button row = Instantiate(assignmentRowTemplate, assignmentListParent);
         row.name = "Row_" + idSuffix;
         row.gameObject.SetActive(true); // template itself stays inactive
-        TMP_Text text = row.GetComponentInChildren<TMP_Text>(true);
+
+        // The second line is a text of its own, showing only when there is something to put on it; the
+        // row's layout group sizes the row to the lines that are showing. A home scene built before rows
+        // had one keeps the single line, with the detail after a dash the way it used to read.
+        Transform detailLine = row.transform.Find(RowDetailName);
+        bool twoLines = !string.IsNullOrEmpty(detail);
+        if (detailLine != null)
+        {
+            detailLine.gameObject.SetActive(twoLines);
+            TMP_Text detailText = detailLine.GetComponent<TMP_Text>();
+            if (detailText != null) detailText.text = twoLines ? detail : string.Empty;
+        }
+        else if (twoLines) label = $"{label} — {detail}";
+
+        Transform labelLine = row.transform.Find("Label");
+        TMP_Text text = labelLine != null ? labelLine.GetComponent<TMP_Text>() : row.GetComponentInChildren<TMP_Text>(true);
         if (text != null) text.text = label;
         PressFeedback.Tint(row, selected ? selectedRowTint : rowTint); // not row.image — see PressFeedback.Tint
         row.onClick.AddListener(onClick);
@@ -332,33 +387,61 @@ public class ControllerConfigScreen : MonoBehaviour
         for (int i = 0; i < ControllerMapSettings.ButtonCount; i++) RefreshButton(i);
     }
 
-    // Assigned buttons tint accent and list EVERY function they drive under the diagram, one per
+    // Assigned buttons tint accent and list EVERY function they drive beside the button, one per
     // line ("DR4B REV" / "Claw Clamp TOG") — a button can legitimately drive several mechanisms, and
-    // showing only the first left the rest invisible. The caption rect is top-anchored and three
-    // lines tall (BuildHomeScene.CreateConfigButton), so past that they fold into a "+N" tail rather
-    // than running into the row below.
+    // showing only the first left the rest invisible. Each caption has a box three lines tall, on a
+    // side of its button that nothing else reaches into (BuildHomeScene.CreateConfigButton), so past
+    // that they fold into a "+N" tail rather than running into another button.
     private const int MaxCaptionLines = 3;
 
     private void RefreshButton(int index)
     {
         List<ButtonAssignment> assignments = ControllerMapSettings.FindAll(map, (ControllerButton)index);
+        TMP_Text caption = index < assignmentLabels.Length ? assignmentLabels[index] : null;
 
-        var lines = new List<string>();
+        var names = new List<string>();
+        var tags = new List<string>();
         int shown = 0;
         foreach (ButtonAssignment assignment in assignments)
         {
             RobotModelCatalog.MechanismInfo mechanism = FindMechanism(assignment.mechanismId);
             if (mechanism == null) continue; // stale (mechanism gone); PruneStaleAssignments clears it
             shown++;
-            if (lines.Count < MaxCaptionLines)
-                lines.Add($"{NameOf(mechanism)} {ControllerMapSettings.ModeCaption(assignment.mode)}");
+            if (names.Count < MaxCaptionLines)
+            {
+                names.Add(NameOf(mechanism));
+                tags.Add(ControllerMapSettings.ModeCaption(assignment.mode));
+            }
         }
-        if (shown > lines.Count && lines.Count > 0) lines[lines.Count - 1] += $" +{shown - lines.Count}";
+        if (shown > names.Count && names.Count > 0) tags[tags.Count - 1] += $" +{shown - names.Count}";
 
-        if (index < assignmentLabels.Length && assignmentLabels[index] != null)
-            assignmentLabels[index].text = string.Join("\n", lines);
+        var lines = new List<string>();
+        for (int i = 0; i < names.Count; i++) lines.Add(FitCaptionLine(caption, names[i], tags[i]));
+        if (caption != null) caption.text = string.Join("\n", lines);
         if (index < buttons.Length)
             PressFeedback.Tint(buttons[index], shown > 0 ? assignedTint : unassignedTint);
+    }
+
+    // One caption line, "Name TAG", shortened to fit the caption's box at the smallest size it may shrink
+    // to: a name too long loses its end to "...", and the tag (what the button does to it, and any "+N")
+    // always survives. Done here, line by line, because TMP's own ellipsis cuts the WHOLE caption at the
+    // first line too wide for the box, and every function listed after it vanishes without a trace.
+    private static string FitCaptionLine(TMP_Text caption, string name, string tag)
+    {
+        string line = $"{name} {tag}";
+        float room = caption != null ? caption.rectTransform.rect.width : 0f;
+        if (room <= 0f) return line;
+        // GetPreferredValues measures an auto-sized text at its largest size, and widths scale with size.
+        float shrink = caption.enableAutoSizing && caption.fontSizeMax > 0f
+            ? caption.fontSizeMin / caption.fontSizeMax
+            : 1f;
+        if (caption.GetPreferredValues(line).x * shrink <= room) return line;
+        for (int keep = name.Length - 1; keep > 0; keep--)
+        {
+            string cut = $"{name.Substring(0, keep).TrimEnd()}... {tag}";
+            if (caption.GetPreferredValues(cut).x * shrink <= room) return cut;
+        }
+        return tag;
     }
 
     // A mechanism whose display name never got set would otherwise render as a bare " — Forward
