@@ -52,7 +52,7 @@ public class BuildHomeScene
     // A version stamp turns "did I remember to add a check for this?" — a judgement call that has
     // to be made correctly every time — into a one-line bump. It is also the ONLY thing that can
     // catch a change with no object footprint at all, which an added component is.
-    internal const string HomeSceneStamp = "HomeSceneStamp_v11";
+    internal const string HomeSceneStamp = "HomeSceneStamp_v12";
 
     // The theme, derived from the app icon (Assets/Icons/AppIcon.png) rather than invented.
     //
@@ -950,7 +950,7 @@ public class BuildHomeScene
         // It sits with the robot rather than with the controls because it is a fact about THIS
         // robot — which end carries the intake — not a preference about the sticks.
         Toggle reverseDriveToggle = CreateToggle("ReverseDriveToggle", robotPage.transform,
-            "Drive Backwards (swap which end is the front)", ReverseDriveSettings.DefaultReversed);
+            "Swap Drive Direction", ReverseDriveSettings.DefaultReversed);
         SetLayoutHeight(reverseDriveToggle.gameObject, 64f);
 
         // Lite field: checkbox (persisted via FieldSceneSettings). Drive loads the stripped-down
