@@ -230,12 +230,15 @@ MonoBehaviour:
       - button: R2
         mechanismId: scoringmech
         mode: reverse
+      - button: Left
+        mechanismId: outtake-1
+        mode: forward
+      - button: Right
+        mechanismId: outtake-1
+        mode: reverse
       - button: Up
         mechanismId: outtake-1
         mode: forward
-      - button: Down
-        mechanismId: outtake-1
-        mode: reverse
       styles:
       - mechanismId: outtake-1
         style: two
