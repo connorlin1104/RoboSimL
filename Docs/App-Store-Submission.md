@@ -109,7 +109,7 @@ changed later without a new build.
 
 ---
 
-## Version Information (1.0)
+## Version Information
 
 ### Promotional text (170 max — editable later without a new build)
 
@@ -135,44 +135,67 @@ Drive the robot before you build it. Send your team's 3D model and get it back a
 ```
 A driving practice tool for competition robotics teams.
 
-Every robot in the app began as a team's own CAD. Each one is rebuilt part by part — real joints,
-real pivots, real drivetrain geometry — so what you drive on your phone moves the way the machine on
-the field moves.
+Every robot in the app began as a team's own CAD. Each one is rebuilt part by part — real joints, real pivots, real drivetrain geometry — so what you drive on your phone moves the way the machine on the field moves.
 
 DRIVE
-Twin on-screen sticks and a set of mechanism buttons. Pick a robot, tap Drive, and you are on a
-full-size field with cups, pins and stakes to move.
+Twin on-screen sticks and a set of mechanism buttons. Pick a robot, tap Drive, and you are on a full-size field with cups, pins and toggles to rotate.
 
 MECHANISMS THAT WORK LIKE THE REAL ONES
-Claws open and close and actually hold a game piece. Cascade lifts and double reverse four-bars run
-through their real travel. Pneumatic cylinders snap between two positions the way a solenoid does,
-in the real 20 / 50 / 90 mm stroke classes. Intakes pull pieces in. Nothing here is an animation —
-each mechanism is a physics joint being driven by a motor model.
+Claws open and close and actually hold a game piece. Cascade lifts and double reverse four-bars run through their real travel. Pneumatic cylinders snap between two positions the way a solenoid does, in the real 25 / 50 / 75 mm stroke classes. Intakes pull pieces in. Nothing here is an animation — each mechanism is a physics joint being driven by a motor model.
 
 PHYSICS TUNED AGAINST THE MACHINE
-Wheel speed is set from the drivetrain's real free-spin RPM. Slam the sticks into reverse and the
-robot plows to the traction limit instead of stopping dead. Raise a lift and the robot rolls in
-turns, exactly as a tall robot does. Robots have real mass, and a heavy arm out front changes how
-the whole thing drives.
+Wheel speed is set from the drivetrain's real free-spin RPM. Slam the sticks into reverse and the robot plows to the traction limit instead of stopping dead. Raise a lift and the robot rolls in turns, exactly as a tall robot does. Robots have real mass, and a heavy arm out front changes how the whole thing drives.
 
 CONTROLS YOU CAN MAKE YOURS
-Resize the sticks, change their opacity, drag every button where your thumbs actually are, and
-reassign what each one does. Switch a mechanism between one-button toggle and two-button hold. Set
-drive and turn sensitivity. Choose which end of the robot the sticks treat as the front.
+Resize the sticks, change their opacity, drag every button where your thumbs actually are, and reassign what each one does. Switch a mechanism between one-button toggle and two-button hold. Set drive and turn sensitivity. Choose which end of the robot the sticks treat as the front.
 
 YOUR ROBOT IN THE APP
-Send us your robot from inside the app — an FBX exported out of your CAD, or a URDF — and we will
-build it into a drivable robot and send it back to you. Choose whether it is listed for everyone or unlocked only by a code you pass to your
-own team. It takes a few days and we tell you when it is done — or tell you what to re-export if
-the file cannot be made to drive.
+Send us your robot from inside the app — an FBX exported out of your CAD, or a URDF — and we will build it into a drivable robot and send it back to you. Choose whether it is listed for everyone or unlocked only by a code you pass to your own team. It takes a few days and we tell you when it is done — or tell you what to re-export if the file cannot be made to drive.
 
 NO ACCOUNT, NO ADS, NO PURCHASES
-There is nothing to sign up for and nothing to buy. Your settings never leave your device. The app
-works offline.
+There is nothing to sign up for and nothing to buy. Your settings never leave your device. The app works offline.
 
-Not affiliated with, endorsed by, or sponsored by VEX Robotics, Innovation First International, or
-the REC Foundation. Robot designs remain the property of the teams that built them.
+Not affiliated with, endorsed by, or sponsored by VEX Robotics, Innovation First International, or the REC Foundation. Robot designs remain the property of the teams that built them.
 ```
+
+- **One paragraph per line — do not paste the wrap.** App Store Connect preserves newlines, so
+  hard-wrapped text re-wraps again on a phone and comes out ragged. The block above is stored
+  unwrapped for exactly this reason; the promotional-text block says the same thing
+- **Terminology is the current game's, and the code disagrees with it** (Connor, 2026-09-17):
+  - **Toggles**, not rollers — the code calls them rollers (`RollerSnap`, `RigRollersWindow`)
+  - **goals**, not stakes — "stakes" is two games ago. `GoalStackMagnet.cs` tooltips still say it
+    throughout, but they are Editor-only so no player sees them
+  - Pneumatic classes are **25 / 50 / 75 mm**. `ClawRig.cs:192` and `PneumaticBuilder.cs`'s
+    `CylinderSize` enum both assert 20 / 50 / 90, which is wrong — open to fix for 1.2
+
+### What's New (4000 max — required for every version after the first)
+
+Release notes do **not** carry over between versions; the description, keywords and URLs do. A new
+version record starts with this field empty and will not submit without it.
+
+1.1:
+
+```
+A redesigned look, and a field that plays fairer.
+
+MENUS AND HOME SCREEN
+• The home screen now puts your robot on a slow turntable, with the menu docked beside it.
+• A row of chips under each robot's name shows what it's built from at a glance — drive and lift wattage, and its intake or claw.
+• Menus, buttons and text are drawn in the app's own style, and now fit properly on every screen size.
+• The Configure Controller screen fits on a phone, with nothing drawn underneath another button.
+• The drive-direction switch reads "Swap Drive Direction".
+
+DRIVING AND THE FIELD
+• Toggles turn exactly one face per hit, however hard you hit them. They used to spin freely when clipped.
+• The practice field starts with its goals loaded and its features spread out, so there's more to drive at.
+• Fixed a scoring bug where a game piece could not always be handed from the floor intake to the scoring intake.
+
+ALSO
+• Settings ▸ Robot ▸ Show Performance Stats puts a live frame rate, memory and thermal readout on screen.
+```
+
+- 1015 / 4000
+- Same wrap rule as the description: one paragraph per line
 
 ### Keywords (100 max, comma-separated, no spaces)
 
