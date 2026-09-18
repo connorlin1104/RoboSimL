@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using Object = UnityEngine.Object;
 
@@ -23,6 +24,9 @@ using Object = UnityEngine.Object;
 //   - FLATTENED: every renderer moved up to the root and the CAD group nodes deleted. 654V_v2 is 5,645
 //     objects seventeen levels deep, and its showcase is about 740. That is prefab size and instantiate
 //     time — not per-frame cost, because the stage never moves the robot.
+//   - MERGED to ONE DRAW PER MATERIAL by MergeByMaterial — 576 parts of 654V v3 become 2 meshes. This is
+//     the whole per-frame cost of the stage: measured on a phone, the home screen cost 15.84 ms of GPU a
+//     frame with the robot turning and 1.63 ms with it off (Docs/Device-Performance.md, 2026-09-17).
 //   - No shadows, no probes, on the ShowcaseRobot layer.
 //
 // NOT UNDER Assets/Robots. RoboSimPaths.RobotPrefabPaths scans that folder recursively for 42 callers.
@@ -39,14 +43,26 @@ public static class BuildShowcasePrefabs
     // Bump when the bake itself changes — the cull rule, the flatten, anything that would make a fresh bake
     // of an unchanged robot come out different. It is part of each entry's showcaseSource, so a bump
     // re-bakes every robot on the next Build Home Screen instead of leaving old bakes in place.
-    private const string BakeVersion = "showcase-1";
+    private const string BakeVersion = "showcase-2";
 
-    // What one showcase may cost. Over the budget is reported; over the limit, the robot gets no showcase
-    // and goes on the stage as its name over the chassis mark. The stage draws a robot's renderers 30
-    // times a second on the screen people sit on while deciding what to do, so a robot that blows this
-    // is worth looking at before it ships, not after it's found on a device. Baseline: 361 / 612 / 737 / 576.
+    // What one showcase may cost, counted in PARTS KEPT — before MergeByMaterial folds them into one draw
+    // per material. It stopped being a per-frame cost when the merge landed, but it is still the honest
+    // measure of how much geometry a robot brings: the merge keeps every triangle, so what a big part count
+    // buys you now is vertices rather than draws. Over the budget is reported; over the limit, the robot
+    // gets no showcase and goes on the stage as its name over the chassis mark.
+    // Baseline: 361 / 612 / 737 / 576.
     public const int RendererBudget = 800;
     public const int RendererLimit = 900;
+
+    // What one showcase may DRAW, in triangles, and the number that actually governs. A phone frame is
+    // normally budgeted around 300,000; the stage draws one of these thirty times a second.
+    //
+    // Measured 2026-09-17 (Geometry Census): every robot that ships is raw CAD, 2.9M to 10.8M triangles a
+    // showcase, because ReduceRobotMeshes has never been run on any of them. Merging those into one mesh
+    // per material writes the same geometry out where you can see it — 2.5 GB of mesh assets for four
+    // robots — so the merge refuses rather than produce that. The limit sits above a robot decimated at
+    // the tool's default 0.08 (654V v3 lands near 750k) and far below any of them undecimated.
+    public const int TriangleLimit = 1_500_000;
 
     // The CAD exporter's generic leaf names. Every renderer on the shipped robots sits on a "Body1".."BodyN"
     // leaf under the part it belongs to.
@@ -60,15 +76,20 @@ public static class BuildShowcasePrefabs
         public int fasteners;
         public int hidden;
         public int keptNested;
+        public int partsKept;
         public int renderersAfter;
         public int objectsAfter;
+        public int triangles;
+        public int vertices;
         public readonly List<string> warnings = new List<string>();
 
         public string Describe(string robot) =>
-            $"  {robot}: {renderersBefore} -> {renderersAfter} renderers ({fasteners} fastener, {hidden} hidden), " +
-            $"{objectsAfter} objects, {stripped} components stripped" +
-            (keptNested > 0 ? $", {keptNested} left nested to avoid shearing them" : string.Empty) +
-            (renderersAfter > RendererBudget ? $" — OVER the {RendererBudget} budget" : string.Empty) +
+            $"  {robot}: {renderersBefore} -> {partsKept} parts ({fasteners} fastener, {hidden} hidden) -> " +
+            $"{renderersAfter} draw{(renderersAfter == 1 ? string.Empty : "s")}, " +
+            $"{triangles:N0} triangles, {vertices:N0} vertices, {objectsAfter} objects, " +
+            $"{stripped} components stripped" +
+            (keptNested > 0 ? $", {keptNested} were left nested before the merge" : string.Empty) +
+            (partsKept > RendererBudget ? $" — OVER the {RendererBudget} part budget" : string.Empty) +
             (warnings.Count > 0 ? "\n    " + string.Join("\n    ", warnings) : string.Empty);
     }
 
@@ -189,6 +210,28 @@ public static class BuildShowcasePrefabs
         return kept;
     }
 
+    // How many triangles a correct bake of this robot keeps. Validate Home Stage measures the merged
+    // meshes against it: once the parts are merged, counting renderers proves nothing — there is one per
+    // material by construction — but every triangle the cull kept still has to be there. Skips exactly
+    // what MergeByMaterial skips, or the two numbers would not be comparable.
+    internal static int ExpectedTriangles(GameObject source)
+    {
+        long indices = 0;
+        foreach (MeshRenderer renderer in source.GetComponentsInChildren<MeshRenderer>(true))
+        {
+            if (IsFastenerPart(renderer.transform, source.transform) || IsHidden(renderer, source.transform)) continue;
+            MeshFilter filter = renderer.GetComponent<MeshFilter>();
+            Mesh mesh = filter != null ? filter.sharedMesh : null;
+            if (mesh == null) continue;
+            Material[] materials = renderer.sharedMaterials;
+            for (int sub = 0; sub < mesh.subMeshCount; sub++)
+            {
+                if (sub < materials.Length && materials[sub] != null) indices += mesh.GetIndexCount(sub);
+            }
+        }
+        return (int)(indices / 3);
+    }
+
     private static RobotModelCatalog LoadCatalog()
     {
         RobotModelCatalog catalog = RoboSimPaths.LoadRobotCatalog();
@@ -237,7 +280,7 @@ public static class BuildShowcasePrefabs
             changed = true;
             try
             {
-                Stats stats = BakeOne(entry.prefab, path);
+                Stats stats = BakeOne(entry.prefab, path, MeshesPath(entry.id));
                 entry.showcasePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
                 entry.showcaseSource = stamp;
                 written.Add(entry.showcasePrefab);
@@ -265,7 +308,7 @@ public static class BuildShowcasePrefabs
         return failures.Count > 0 ? $"{report}, {failures.Count} FAILED" : report;
     }
 
-    private static Stats BakeOne(GameObject source, string path)
+    private static Stats BakeOne(GameObject source, string path, string meshPath)
     {
         var stats = new Stats();
 
@@ -294,6 +337,16 @@ public static class BuildShowcasePrefabs
 
             CullParts(root, stats);
             stats.keptNested = Flatten(root);
+
+            // Counted, checked and reported while the parts still exist and still have their names — after
+            // the merge there is one object per material and nothing left to name.
+            stats.partsKept = copy.GetComponentsInChildren<MeshRenderer>(true).Length;
+            CheckDrawable(copy, stats);
+            if (stats.partsKept > RendererLimit)
+                throw new InvalidOperationException(
+                    $"{stats.partsKept} parts after the cull, over the limit of {RendererLimit}.");
+
+            MergeByMaterial(copy, meshPath, stats);
             RobotShowcase.PrepareRenderers(copy);
 
             // Every robot prefab root sits 12-16 units from the origin, where it was saved from a scene, and
@@ -302,10 +355,6 @@ public static class BuildShowcasePrefabs
 
             stats.renderersAfter = copy.GetComponentsInChildren<MeshRenderer>(true).Length;
             stats.objectsAfter = copy.GetComponentsInChildren<Transform>(true).Length;
-            CheckDrawable(copy, stats);
-            if (stats.renderersAfter > RendererLimit)
-                throw new InvalidOperationException(
-                    $"{stats.renderersAfter} renderers after the cull, over the limit of {RendererLimit}.");
 
             // Saved as its own root, out from under the inactive holder.
             root.SetParent(null, false);
@@ -317,6 +366,120 @@ public static class BuildShowcasePrefabs
         {
             EditorSceneManager.ClosePreviewScene(preview);
         }
+    }
+
+    // ONE DRAW PER MATERIAL, instead of one per CAD part.
+    //
+    // A showcase has no ArticulationBody, no Rigidbody and no collider — RobotShowcase.StripToRenderers
+    // takes all of that off — so nothing in it can move relative to anything else in it, ever. Its parts
+    // are separate only because that is the shape the CAD came in. 654V v3 arrives as 576 of them built
+    // from two materials.
+    //
+    // Why it is worth doing: measured on an iPhone 13 (Docs/Device-Performance.md, 2026-09-17), the home
+    // screen cost 15.84 ms of GPU a frame with the robot turning and 1.63 ms with the stage switched off,
+    // on a phone that had 16.7 ms to spend. It is not fill rate — render scale is already 0.8 and MSAA is
+    // off — it is the per-draw overhead of hundreds of small draws, and the rasteriser work wasted on CAD
+    // triangles small enough to cost a 2x2 quad each.
+    //
+    // Per SUBMESH, not per renderer: a dozen to two dozen parts on each robot carry two materials, and
+    // bucketing on the renderer's whole material array would leave every one of those drawing on its own.
+    //
+    // Vertices are baked into ROOT-LOCAL space, which also settles what Flatten had to give up on. A part
+    // under a non-uniform scale that is rotated relative to it has a sheared placement no Transform can
+    // hold, so the flatten leaves those nested rather than deform them (see Flatten). A vertex does not
+    // care: the shear is in the matrix it is multiplied through, and CombineMeshes carries normals and
+    // tangents through the inverse transpose of that same matrix. None of the four shipping robots has a
+    // mirrored part, which is the case this would get wrong — a negative determinant flips winding, and
+    // CombineMeshes does not reverse the triangles to match.
+    private static void MergeByMaterial(GameObject copy, string meshPath, Stats stats)
+    {
+        Transform root = copy.transform;
+        var order = new List<Material>();
+        var groups = new Dictionary<Material, List<CombineInstance>>();
+        var expectedIndices = new Dictionary<Material, long>();
+
+        foreach (MeshRenderer renderer in root.GetComponentsInChildren<MeshRenderer>(true))
+        {
+            MeshFilter filter = renderer.GetComponent<MeshFilter>();
+            Mesh mesh = filter != null ? filter.sharedMesh : null;
+            if (mesh == null) continue;                         // CheckDrawable has already reported it
+
+            Matrix4x4 toRoot = root.worldToLocalMatrix * renderer.transform.localToWorldMatrix;
+            Material[] materials = renderer.sharedMaterials;
+            for (int sub = 0; sub < mesh.subMeshCount; sub++)
+            {
+                Material material = sub < materials.Length ? materials[sub] : null;
+                if (material == null) continue;                 // likewise
+                if (!groups.TryGetValue(material, out List<CombineInstance> group))
+                {
+                    group = new List<CombineInstance>();
+                    groups.Add(material, group);
+                    expectedIndices.Add(material, 0L);
+                    order.Add(material);
+                }
+                group.Add(new CombineInstance { mesh = mesh, subMeshIndex = sub, transform = toRoot });
+                expectedIndices[material] += mesh.GetIndexCount(sub);
+            }
+        }
+
+        if (order.Count == 0)
+            throw new InvalidOperationException("nothing is left to draw after the cull.");
+
+        long totalIndices = 0;
+        foreach (long count in expectedIndices.Values) totalIndices += count;
+        long totalTriangles = totalIndices / 3;
+        if (totalTriangles > TriangleLimit)
+            throw new InvalidOperationException(
+                $"{totalTriangles:N0} triangles, over the limit of {TriangleLimit:N0} — this robot's meshes " +
+                "have not been reduced. Run Tools > RoboSim > Robot > Reduce Robot Meshes on it first " +
+                "(colliders are untouched, so it cannot change how the robot drives). Merging raw CAD here " +
+                "writes a second copy of every triangle: measured, that is 218-230 MB for one robot.");
+
+        // The parts go before the merged meshes arrive, so what is counted afterwards is the merge alone.
+        for (int i = root.childCount - 1; i >= 0; i--) Object.DestroyImmediate(root.GetChild(i).gameObject);
+        if (copy.GetComponent<MeshRenderer>() is MeshRenderer onRoot) Object.DestroyImmediate(onRoot);
+        if (copy.GetComponent<MeshFilter>() is MeshFilter filterOnRoot) Object.DestroyImmediate(filterOnRoot);
+
+        var meshes = new List<Mesh>(order.Count);
+        for (int i = 0; i < order.Count; i++)
+        {
+            Material material = order[i];
+            var merged = new Mesh { name = $"{copy.name}_{i}_{material.name}" };
+
+            // Combined CAD runs to hundreds of thousands of vertices and 16-bit indices stop at 65,535.
+            merged.indexFormat = IndexFormat.UInt32;
+            merged.CombineMeshes(groups[material].ToArray(), true, true, false);
+
+            // The robots' FBX are imported with Read/Write OFF. Reading them works here because the editor
+            // still holds the imported data — but if that ever stops being true, CombineMeshes returns an
+            // empty mesh and logs nothing, and the first screen of the app goes blank. Count the indices in
+            // and out rather than trust it.
+            long got = 0;
+            for (int sub = 0; sub < merged.subMeshCount; sub++) got += merged.GetIndexCount(sub);
+            if (got != expectedIndices[material])
+                throw new InvalidOperationException(
+                    $"merging '{material.name}' produced {got:N0} indices out of {expectedIndices[material]:N0} in — " +
+                    "the source meshes did not read back. Turn Read/Write on for this robot's FBX.");
+
+            merged.RecalculateBounds();
+            merged.Optimize();
+            meshes.Add(merged);
+
+            var part = new GameObject(merged.name, typeof(MeshFilter), typeof(MeshRenderer));
+            part.transform.SetParent(root, false);
+            part.GetComponent<MeshFilter>().sharedMesh = merged;
+            part.GetComponent<MeshRenderer>().sharedMaterial = material;
+
+            stats.triangles += (int)(got / 3);
+            stats.vertices += merged.vertexCount;
+        }
+
+        // A mesh made in memory has to be an asset before the prefab referencing it is saved, or the prefab
+        // saves a null mesh and the stage draws nothing. One file holds all of a robot's merged meshes.
+        AssetDatabase.DeleteAsset(meshPath);
+        AssetDatabase.CreateAsset(meshes[0], meshPath);
+        for (int i = 1; i < meshes.Count; i++) AssetDatabase.AddObjectToAsset(meshes[i], meshPath);
+        AssetDatabase.SaveAssets();
     }
 
     // Removes the renderer and mesh of every part that is a fastener or hidden. Components, not
@@ -456,6 +619,15 @@ public static class BuildShowcasePrefabs
         var safe = new StringBuilder(id.Length);
         foreach (char c in id) safe.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
         return $"{RoboSimPaths.ShowcaseFolder}/{safe}_Showcase.prefab";
+    }
+
+    // The merged meshes, one file per robot beside its showcase. A sub-asset of the prefab would be
+    // tidier, but SaveAsPrefabAsset rewrites the file and would take them with it on every re-bake.
+    private static string MeshesPath(string id)
+    {
+        var safe = new StringBuilder(id.Length);
+        foreach (char c in id) safe.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
+        return $"{RoboSimPaths.ShowcaseFolder}/{safe}_ShowcaseMeshes.asset";
     }
 
     private static void EnsureFolder()

@@ -8,46 +8,65 @@ Ranked by what a player actually feels.
 
 ## The cause, found 2026-09-17
 
-Both GPU findings are **one problem: draw calls.** Every robot is imported CAD, and every CAD part
-is still its own `MeshRenderer` — hundreds of them, all sharing two materials.
+**Nothing that ships has ever been decimated.** Both GPU findings are that one fact.
 
-| | renderers | distinct materials | things that actually move |
-| --- | --- | --- | --- |
-| LiteScene (the field alone) | 752 | 3 | 15 Rigidbodies |
-| `654V_v3.prefab` (drivable) | 769 | 2 | 28 ArticulationBodies |
-| `ryan-cascaderobot_Showcase` | 576 | 2 | **none** |
-| `654v-v2_Showcase` | 737 | 2 | none |
-| `654v-v1_Showcase` | 612 | 2 | none |
-| `360rpm-drivetrain_Showcase` | 361 | 2 | none |
+Measured by `Tools ▸ RoboSim ▸ Validate ▸ Geometry Census`. "Drawn" counts every renderer every frame,
+which is the GPU's bill; "unique" counts each mesh once, which is the memory bill. A phone frame is
+normally budgeted around **300,000** triangles.
 
-- **A driving frame is field 752 + robot 769 = ~1,520 draw calls, drawn from three materials.** The
-  home screen draws 576 for one robot that does nothing but turn
-- They are not separate for any reason that survives inspection:
-  - the showcase prefabs have **no ArticulationBody, no Rigidbody and no collider** — they are
-    pictures, and 576 of their parts are welded to each other by definition
-  - the drivable robot has 769 renderers hanging off **28 links**. Nothing inside a link can move
-    relative to anything else inside it
-  - the field has 752 renderers and **15** Rigidbodies, so ~737 of them never move at all — and
-    only 72 of the scene's 1,825 objects carry any static flag
-- Merged by material, those numbers become: showcase **2**, robot **~56** (28 links x 2 materials),
-  field a few dozen if merged per region. Call it 60 instead of 1,520
-- This also explains the shape of the measurements. It is not fill rate: render scale is already
-  0.8 and MSAA is off, and the same ~1,500 draws cost the same whether the phone is cool or hot.
-  Tiny CAD triangles rasterise at a 2x2 quad minimum, so hundreds of small draws waste the GPU
-  twice over — per-draw overhead and wasted rasteriser
+| | draws | **triangles drawn** | unique meshes | mesh memory |
+| --- | --- | --- | --- | --- |
+| LiteScene, the field alone | 752 | **2,700,248** | 717 | 249 MB |
+| SampleScene, the full field | 1,390 | 6,203,690 | 1,355 | 568 MB |
+| 654V v3, drivable | 769 | **9,371,311** | 150 | 226 MB |
+| 654V v2, drivable | 1,639 | 12,900,907 | 220 | 246 MB |
+| 654V v1, drivable | 800 | 5,514,143 | 183 | 228 MB |
+| 360 RPM Drivetrain, drivable | 521 | 3,074,202 | 39 | 39 MB |
+| 654V v3 showcase (home screen) | 576 | **9,131,013** | 99 | 218 MB |
+| 654V v2 showcase | 737 | 10,816,607 | 147 | 230 MB |
+
+- **Driving is the field plus the robot on top of it: ~12.1 million triangles a frame.** Forty times
+  what a phone frame is meant to carry, and 226 + 249 MB of mesh before anything else loads
+- **The home screen draws 9.1 million of them thirty times a second** for a robot that only turns
+- The references say why. 767 of 654V v3's 769 meshes point straight into `Ryan_CascadeRobot.fbx`
+  (103 MB), and 710 of LiteScene's 752 point straight into `OverrideFieldVersion3.fbx` (205 MB).
+  Raw CAD, imported and shipped
+- The project already knows this is wrong and already has the tool. `ReduceRobotMeshes` /
+  `MeshDecimator` were written for it, and `ReduceRobotMeshes`'s own header says one 654V is "~2.8
+  million triangles and ~226 MB of runtime mesh data" and that keeping 0.08 of it "takes 2.8M down to
+  about 220k". **It was never run on the four robots that ship, or on the field.**
+
+### What it was NOT
+
+Worth writing down, because it was the first answer and it was wrong. The four robots carry 361-737
+parts each, built from two material *assets*, which reads like a draw-call problem. It is not:
+
+- Merging each showcase to one draw per material works — 576 draws become 18, 737 become 42 — and
+  moves the triangle count by exactly nothing. The merge is implemented (`BuildShowcasePrefabs`),
+  and guarded so it cannot bake until the geometry comes down
+- The tell was baking it: merged copies of undecimated meshes came to **2.5 GB of assets** for four
+  robots. That is the same geometry, written out where its size is visible
+- Counting distinct material *assets* undercounts badly. An FBX holds its materials as sub-assets of
+  one file, so three guids across the project are really 8 to 54 materials
 
 ### The order to do it in
 
-1. **Merge the showcase prefabs.** Biggest win for the least risk: static, no physics, two
-   materials, and `Build Home Screen` already generates them, so the merge is a bake step.
-   576 -> 2
+1. **Decimate the robots**, one at a time — `Tools ▸ RoboSim ▸ Robot ▸ Reduce Robot Meshes`, or
+   `-executeMethod ReduceRobotMeshes.RunBatch -robot <name> -keep 0.08`. It replaces the render
+   meshes and **does not touch colliders**, so it cannot change how a robot drives. Doing them one at
+   a time with the result in front of you is the tool's own instruction, and the ratio is a
+   judgement about how that robot looks
+   - It fixes both screens at once: a showcase is baked from its robot, so a decimated robot bakes a
+     decimated showcase
+   - At 0.08, 654V v3 goes from 9.37M drawn triangles to roughly 750k, and 226 MB to roughly 18 MB
 2. **Re-run run 2 on the phone** (10 min, robot `Turning`). The `gpu` number is the whole
-   experiment: 15.84 ms should collapse. If it does not, this diagnosis is wrong and the field work
-   below is not worth starting
-3. **Merge the field's static structure**, per region rather than into one mesh — one giant mesh
-   cannot be frustum-culled. The 15 Rigidbodies stay as they are
-4. **Merge each robot link's visual meshes**, one per material per link. Colliders and the
-   ArticulationBody hierarchy stay exactly where they are — only the renderers combine
+   experiment: 15.84 ms against 1.63 ms with the stage off
+3. **Decimate the field.** Riskier than a robot and worth doing second: check first whether any
+   MeshCollider in LiteScene shares a render mesh, because that is physics, not decoration.
+   `ReduceRobotMeshes` refuses to touch those and reports them
+4. **Then decide about merging.** After decimation the draws are the only thing left, and merging
+   costs a duplicated copy of the mesh data — cheap once the meshes are small, and possibly not worth
+   it at all. Measure before spending it
 5. **Re-run run 4** and see where `Serious` lands. Heat is the work: cut the work and the wall
    moves out
 
@@ -61,7 +80,6 @@ is still its own `MeshRenderer` — hundreds of them, all sharing two materials.
   - `m_SupportsHDR: 1` makes that intermediate FP16, doubling its bandwidth, for effects that are off
   - Turn both off and check a screenshot is identical. It should be
 - All 752 LiteScene renderers have `m_ReceiveShadows: 1`, including ones nothing can shadow
-- Watch the vertex count when merging — over 65,535 the combined mesh needs `IndexFormat.UInt32`
 
 ## 1. The field drops to 30 fps after four minutes of driving
 
@@ -77,7 +95,8 @@ holds it there for the rest of the session — it never recovers while you keep 
     throttle slows the CPU too
 - Render scale is already 0.8 and MSAA is already off (`Mobile_RPAsset.asset:28-29`), so the easy
   resolution lever is spent. The cost is shading, overdraw or draw calls
-- **Cause found** — see *The cause* above: ~1,520 draw calls a frame from three materials
+- **Cause found** — see *The cause* above: the field draws 2.70M triangles and the robot on
+  top of it 9.37M, against a ~300k phone budget. Undecimated CAD
 - Target: 16.7 ms cool. That buys 60 fps *and* pushes `Serious` out past a realistic session
 
 ## 2. The home screen runs at 48 fps because of the turntable
@@ -98,7 +117,7 @@ holds it there for the rest of the session — it never recovers while you keep 
   `RobotStageView.EnsureTexture()` computes `longest / RenderScale()` and caps at
   `maxTextureSize = 1536`
   - Texture size is worth logging, but it is not the main cost — see *The cause* above: the
-    showcase draws 576 times for one static robot built from two materials
+    showcase is 9.1 million triangles, thirty times a phone frame's budget
 - Do **not** just lower `driftRenderRate`. It lowers the average and leaves the hitch
 - Battery, same two runs (the phone reports in 5% steps, so directional only):
   - `Turning` — 40% → 35% inside 10 minutes

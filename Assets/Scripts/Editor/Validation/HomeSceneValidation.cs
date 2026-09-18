@@ -17,7 +17,8 @@ using Object = UnityEngine.Object;
 // say about the shipped robots against those robots' own rigs. The strip is run against the robot that
 // carries NonSupportingLink. The baked showcases are checked as assets —
 // nothing left on them that could wake, every part on the stage layer with no shadow work, the cull
-// keeping exactly the parts it should, and the robot inside the camera's view at every angle of the turn.
+// keeping exactly the triangles it should through the merge, one draw per material, and the robot inside
+// the camera's view at every angle of the turn.
 // The built HomeScene is checked for the settings no structural check can see, above all the two cameras'
 // render order: get that wrong and the whole UI vanishes on every frame the stage draws.
 //
@@ -577,13 +578,35 @@ public static class HomeSceneValidation
                                   showcase.GetComponentsInChildren<Joint>(true).Length == 0, $"{who}'s showcase carries physics.");
             ValidationUtil.Assert(!RobotShowcase.NeedsStrip(showcase), $"{who}'s showcase carries something other than renderers.");
 
-            // The cull kept exactly the parts it should: the count a correct bake of the robot would keep.
+            // The cull kept exactly the parts it should. Counting renderers stopped saying that when
+            // BuildShowcasePrefabs.MergeByMaterial landed — a correct showcase has one per material by
+            // construction — so the count is checked in triangles instead, which the merge preserves
+            // exactly and a mis-read source mesh would not.
             MeshRenderer[] renderers = showcase.GetComponentsInChildren<MeshRenderer>(true);
-            int expected = BuildShowcasePrefabs.ExpectedRenderers(entry.prefab);
-            ValidationUtil.Assert(renderers.Length == expected,
-                $"{who}'s showcase has {renderers.Length} renderers, but its robot has {expected} that aren't fasteners or hidden.");
-            ValidationUtil.Assert(renderers.Length <= BuildShowcasePrefabs.RendererLimit,
-                $"{who}'s showcase has {renderers.Length} renderers, over the limit of {BuildShowcasePrefabs.RendererLimit}.");
+            int triangles = 0;
+            var materials = new HashSet<Material>();
+            foreach (MeshRenderer renderer in renderers)
+            {
+                MeshFilter filter = renderer.GetComponent<MeshFilter>();
+                if (filter != null && filter.sharedMesh != null)
+                {
+                    Mesh mesh = filter.sharedMesh;
+                    for (int sub = 0; sub < mesh.subMeshCount; sub++) triangles += (int)(mesh.GetIndexCount(sub) / 3);
+                }
+                foreach (Material material in renderer.sharedMaterials) materials.Add(material);
+            }
+
+            int expected = BuildShowcasePrefabs.ExpectedTriangles(entry.prefab);
+            ValidationUtil.Assert(triangles == expected,
+                $"{who}'s showcase draws {triangles:N0} triangles, but the parts its robot keeps have {expected:N0} — the merge lost geometry.");
+
+            // The point of the merge: one draw per material, and no part left drawing on its own.
+            ValidationUtil.Assert(renderers.Length == materials.Count,
+                $"{who}'s showcase takes {renderers.Length} draws for {materials.Count} material(s) — the merge left parts behind.");
+
+            int parts = BuildShowcasePrefabs.ExpectedRenderers(entry.prefab);
+            ValidationUtil.Assert(parts <= BuildShowcasePrefabs.RendererLimit,
+                $"{who} keeps {parts} parts after the cull, over the limit of {BuildShowcasePrefabs.RendererLimit}.");
 
             foreach (MeshRenderer renderer in renderers)
             {
@@ -622,8 +645,8 @@ public static class HomeSceneValidation
                 }
             }
 
-            summary.Add($"{entry.displayName} {renderers.Length}");
-            checks += 11 + renderers.Length;
+            summary.Add($"{entry.displayName} {renderers.Length} draw/{triangles:N0} tri");
+            checks += 12 + renderers.Length;
         }
         counts = string.Join(", ", summary);
         return checks;
