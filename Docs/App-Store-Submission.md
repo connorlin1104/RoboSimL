@@ -166,7 +166,8 @@ Not affiliated with, endorsed by, or sponsored by VEX Robotics, Innovation First
   - **goals**, not stakes — "stakes" is two games ago. `GoalStackMagnet.cs` tooltips still say it
     throughout, but they are Editor-only so no player sees them
   - Pneumatic classes are **25 / 50 / 75 mm**. `ClawRig.cs:192` and `PneumaticBuilder.cs`'s
-    `CylinderSize` enum both assert 20 / 50 / 90, which is wrong — open to fix for 1.2
+    `CylinderSize` enum both assert 20 / 50 / 90, which is wrong — open to fix for 1.2,
+    with the rest of the 1.2 list in `Version-1.2.md`
 
 ### What's New (4000 max — required for every version after the first)
 

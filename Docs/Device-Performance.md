@@ -5,7 +5,8 @@ the app measures itself: **Settings ▸ Robot ▸ Show Performance Stats** puts 
 column of numbers in the top-left corner (under L1/L2 in a game) and writes the same numbers to a
 file once a second.
 
-- What it answers — the numbers the home stage (UI Stage 3) has never had from a real device
+- What it answers — the numbers the home stage (UI Stage 3) had never had from a real device.
+  **Answered 2026-09-17** — see *Measured* at the bottom, and `Version-1.2.md` for what follows
   - How long a cold launch takes to reach the home screen, and to put the robot on the stage
   - What the turning robot costs: frame time, heat and memory, against the stage switched off
   - How the field holds up over a long drive, and how long it takes to load
@@ -111,3 +112,62 @@ file once a second.
 ## Turning it off
 
 - Untick Show Performance Stats. The readout goes and the log closes
+
+---
+
+## Measured 2026-09-17 — the first real device run
+
+iPhone 13 (`iPhone14,5`), iOS 26.6.2, 2532x1170 at 60 Hz, app 1.1.0 off TestFlight. Unplugged, Low
+Power off, `Discharging` and `low_power=0` on every row of every session. Six logs.
+
+What to do about all of this is `Version-1.2.md`. The numbers:
+
+### Runs 2 and 3 — what the turning robot costs
+
+The run the whole check was built to answer. Same phone, back to back, `Nominal` throughout both.
+
+| home screen | fps | `frame_ms` | `cpu_main` | **`gpu`** | `footprint` | worst frame |
+| --- | --- | --- | --- | --- | --- | --- |
+| robot `Turning`, 11.6 min | **47.8** | 21.02 | 1.78 | **15.84** | 661 MB | 74.9 ms |
+| robot `Off`, 20.6 min | **60.1** | 16.64 | 0.79 | **1.63** | 667 MB | 20.2 ms |
+
+- The turntable is **~14.2 ms of GPU a frame**, and it is the only difference. The CPU is idle in
+  both, and memory does not move
+- It draws at 30 Hz, so a frame it draws on costs ~28-30 ms of GPU — twice the 16.7 ms budget. That
+  is why the average lands at 48 fps and not at 60
+- Battery: `Turning` went 40% -> 35% inside 10 minutes; `Off` held 35% flat for 20. The phone
+  reports in 5% steps, so read that as a direction, not a rate
+- Ignore `cpu_render_ms` here — it reads 14.6 and 15.7 in two runs whose GPU cost differs 10x,
+  because a render thread blocked on present counts the wait as time
+
+### Run 4 — driving, and the thermal wall
+
+LiteScene, 8.6 minutes, from a cold phone.
+
+| | fps | `frame_ms` | `cpu_main` | `gpu` | heat |
+| --- | --- | --- | --- | --- | --- |
+| first 2.5 min | 48.7 | 20.60 | 6.05 | 22.04 | `Nominal` |
+| after 4:10 | **30.0** | 33.34 | 10.77 | 24.57 | `Serious` |
+
+- `Fair` at 2:45, **`Serious` at 4:10**. From there iOS pins the app to exactly 30.0 fps and holds
+  it for the rest of the session
+- The field is over budget before any of that: **22 ms of GPU on a cool phone** against 16.7. So 60
+  fps is not reachable in LiteScene on this phone at all, and 46-49 was the ceiling
+- `cpu_main` 6.0 -> 10.8 is the throttle slowing the CPU, not new work
+- Memory 807 -> 890 MB, headroom never under 1208 MB
+- Field load: **2.467 s** the first time, 0.17 / 0.21 / 0.30 s on warm reloads. Two of those three
+  reloads hitched, 186 ms and 283 ms
+
+### Cold launches — nothing wrong
+
+Three of them, all `Nominal`.
+
+| | engine ready | first frame | robot on stage |
+| --- | --- | --- | --- |
+| 1 | 3.064 s | 3.283 s | +58 ms |
+| 2 | 3.525 s | 3.741 s | +35 ms |
+| 3 | 3.198 s | 3.408 s | +38 ms |
+
+- `build_ms` for the showcase robot was 1.7-2.4, and `cached` on every later show
+- The 2.3-2.7 s `worst_frame_ms` in each launch window **is the first frame itself**. Not a hitch
+- The home screen was sitting on `Drift` for all three, so these launches carry the 48 fps above
