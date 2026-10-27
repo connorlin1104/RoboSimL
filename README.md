@@ -7,11 +7,28 @@ A competition-robotics simulator for iPhone and iPad, built in Unity. Robots are
 on-screen sticks and a twelve-button controller, on a field of physics pieces that can be picked up,
 carried and scored.
 
-- **App Store:** RoboSimL 1.0, submitted 2026-09-09
+![654V v3 on the full competition field](Docs/images/field-overview.jpg)
+
+- **App Store:** live since 2026-09-17
 - **Support page:** <https://overridesimunity.web.app/>
 - **The project began as *OverrideSim*.** The app, and now this repository, are RoboSimL. The
   Firebase project id (`overridesimunity`) and some internal folder paths still carry the old name,
   because renaming those would break every reference to them for no user-visible gain
+
+---
+
+## Screenshots
+
+Captured from the 1.1 build on a 6.5" iPhone.
+
+| | |
+| --- | --- |
+| ![654V v3 up close at the field wall](Docs/images/robot-closeup.jpg) | ![The goals, with 654V v3 behind them](Docs/images/goals.jpg) |
+| **Real joints and weight.** Every link is its own physics body | **Pieces are physics too.** Pick them up, carry them, stack them on goals |
+| ![Home screen with the robot on a turntable](Docs/images/home.jpg) | ![Choosing a robot in Settings](Docs/images/model-picker.jpg) |
+| **Home.** The chosen robot turns on a stage, with its drive and mechanisms listed under it | **Public and private robots.** A team's own robots show up only for that team |
+| ![Configuring the controller](Docs/images/controller-config.jpg) | ![Submitting a robot](Docs/images/submit-robot.jpg) |
+| **Configure Controller.** Map any of the twelve buttons to any mechanism | **Submit a Robot.** Send in an FBX, URDF or ZIP and get it back drivable |
 
 ---
 
