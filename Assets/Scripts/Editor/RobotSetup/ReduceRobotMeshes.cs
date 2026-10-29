@@ -34,6 +34,7 @@ public class ReduceRobotMeshesWindow : EditorWindow
     [SerializeField] private float maxErrorFraction = 0.004f;
     [SerializeField] private float smoothingAngle = 55f;
     [SerializeField] private bool keepUv;
+    [SerializeField] private bool lookTheSame = true;
 
     private string lastReport = string.Empty;
     private Vector2 scroll;
@@ -81,6 +82,10 @@ public class ReduceRobotMeshesWindow : EditorWindow
         keepUv = EditorGUILayout.Toggle(new GUIContent("Keep UVs",
             "Only if a material actually samples a texture. This project has none, so leaving this " +
             "off drops 8 bytes a vertex for nothing."), keepUv);
+        lookTheSame = EditorGUILayout.Toggle(new GUIContent("Must Look The Same",
+            "Render every part before and after, up close, and only keep a reduction whose pictures " +
+            "match. A part that fails tries gentler ratios, then keeps full detail. Off reduces " +
+            "everything to the ratio, which is what shredded v3's c-channels at 0.1."), lookTheSame);
 
         EditorGUILayout.Space();
         if (GUILayout.Button("Reduce Meshes", GUILayout.Height(30)))
@@ -92,7 +97,7 @@ public class ReduceRobotMeshesWindow : EditorWindow
                 smoothingAngle = smoothingAngle,
                 keepUv = keepUv,
             };
-            try { lastReport = ReduceRobotMeshes.Run(robot, options); }
+            try { lastReport = ReduceRobotMeshes.Run(robot, options, lookTheSame); }
             catch (System.Exception e) { lastReport = e.Message; Debug.LogException(e); }
         }
 
@@ -108,7 +113,7 @@ public static class ReduceRobotMeshes
 {
     private const string MeshFolder = "Assets/RobotMeshes";
 
-    // Headless entry: -executeMethod ReduceRobotMeshes.RunBatch -robot <name> [-keep 0.08]
+    // Headless entry: -executeMethod ReduceRobotMeshes.RunBatch -robot <name> [-keep 0.08] [-lookTheSame]
     //
     // Reducing every robot at once is a one-line loop away, and deliberately not offered: the ratio
     // is a judgement about how a particular robot looks, and the sensible way to find it is one
@@ -131,7 +136,8 @@ public static class ReduceRobotMeshes
         if (!string.IsNullOrEmpty(error) && float.TryParse(error, out float maxError))
             options.maxErrorFraction = maxError;
 
-        Debug.Log(Run(prefab, options));
+        bool lookTheSame = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-lookTheSame") >= 0;
+        Debug.Log(Run(prefab, options, lookTheSame));
     }
 
     private static string Argument(string flag)
@@ -144,18 +150,19 @@ public static class ReduceRobotMeshes
 
     // Decimates every render mesh under `robot` and repoints it at the results. Works on a scene
     // object or on a prefab asset; a prefab is opened, edited and saved. Returns a report.
-    public static string Run(GameObject robot, MeshDecimator.Options options)
+    public static string Run(GameObject robot, MeshDecimator.Options options, bool lookTheSame = false)
     {
         if (robot == null) throw new System.ArgumentNullException(nameof(robot));
 
         string assetPath = AssetDatabase.GetAssetPath(robot);
         bool isPrefabAsset = !string.IsNullOrEmpty(assetPath) && assetPath.EndsWith(".prefab");
-        if (!isPrefabAsset) return Reduce(robot, robot.name, options);
+        if (!isPrefabAsset) return Reduce(robot, robot.name, options, lookTheSame);
 
         GameObject contents = PrefabUtility.LoadPrefabContents(assetPath);
         try
         {
-            string report = Reduce(contents, System.IO.Path.GetFileNameWithoutExtension(assetPath), options);
+            string report = Reduce(contents, System.IO.Path.GetFileNameWithoutExtension(assetPath), options,
+                lookTheSame);
             PrefabUtility.SaveAsPrefabAsset(contents, assetPath);
             return report;
         }
@@ -165,7 +172,8 @@ public static class ReduceRobotMeshes
         }
     }
 
-    private static string Reduce(GameObject root, string robotName, MeshDecimator.Options options)
+    private static string Reduce(GameObject root, string robotName, MeshDecimator.Options options,
+        bool lookTheSame)
     {
         MeshFilter[] filters = root.GetComponentsInChildren<MeshFilter>(true);
         if (filters.Length == 0) return $"'{robotName}' has no MeshFilters — nothing to reduce.";
@@ -197,7 +205,8 @@ public static class ReduceRobotMeshes
 
         long trisBefore = 0, trisOut = 0, vertsBefore = 0, vertsOut = 0;
         var usedNames = new HashSet<string>();
-        int stoppedEarly = 0;
+        int stoppedEarly = 0, gentler = 0, fullDetail = 0;
+        DecimationVisualCheck check = lookTheSame ? new DecimationVisualCheck() : null;
 
         try
         {
@@ -214,7 +223,12 @@ public static class ReduceRobotMeshes
                     break;
                 }
 
-                MeshDecimator.Result result = MeshDecimator.Simplify(source, options);
+                string verdict = null;
+                MeshDecimator.Result result = check == null
+                    ? MeshDecimator.Simplify(source, options)
+                    : SimplifyLookingTheSame(source, options, check, out verdict);
+                if (verdict == GentlerVerdict) gentler++;
+                if (verdict == FullDetailVerdict) fullDetail++;
                 trisBefore += result.sourceTriangles;
                 vertsBefore += result.sourceVertices;
 
@@ -238,11 +252,13 @@ public static class ReduceRobotMeshes
                 report.AppendLine(
                     $"{Trim(source.name, 28),-28} {result.sourceTriangles,10:N0} {result.triangles,10:N0} " +
                     $"{result.TriangleRatio,6:P0} {result.maxDeviation,10:F4}" +
-                    (result.hitErrorCeiling ? "  (stopped on error)" : string.Empty));
+                    (result.hitErrorCeiling ? "  (stopped on error)" : string.Empty) +
+                    (verdict != null ? $"  ({verdict})" : string.Empty));
             }
         }
         finally
         {
+            check?.Dispose();
             EditorUtility.ClearProgressBar();
             AssetDatabase.SaveAssets();
             RestoreReadable(unlocked);
@@ -277,6 +293,9 @@ public static class ReduceRobotMeshes
         if (stoppedEarly > 0)
             report.AppendLine($"{stoppedEarly} mesh(es) stopped on the error ceiling before reaching the " +
                               "ratio — they were already about as simple as their shape allows.");
+        if (check != null)
+            report.AppendLine($"Must Look The Same: {gentler} mesh(es) needed a gentler ratio and {fullDetail} " +
+                              "kept full detail, because reducing them changed how they look.");
         if (physicsSharers.Count > 0)
         {
             report.AppendLine();
@@ -290,6 +309,83 @@ public static class ReduceRobotMeshes
 
         return report.ToString();
     }
+
+    // The ratios a part steps back through when its reduction does not look like the original. Past
+    // 0.5 the triangles saved are not worth any visible change, so a part that fails 0.5 keeps them all.
+    private static readonly float[] GentlerRatios = { 0.2f, 0.35f, 0.5f };
+
+    // Fraction of a close-up tile allowed to differ (see DecimationVisualCheck). Measured on 654V v3:
+    // wheels and gears reduced to 0.1 score 0.002-0.01 and look identical; the c-channels that came
+    // out shredded score 0.25 and up, at every ratio. Strict on purpose — the bar is "looks the same",
+    // and loosening it to 0.05 bought only ~4 % more of the triangles when measured.
+    private const float LookLimit = 0.01f;
+
+    private const string GentlerVerdict = "gentler ratio to look the same";
+    private const string FullDetailVerdict = "every triangle kept, reducing it showed";
+
+    // A reduction passes if it looks like EITHER of two references: the raw import, or the part run
+    // through the decimator with nothing removed (welded, normals rebuilt, every triangle kept).
+    // Measured on v3, neither alone is right. The screw shafts and standoffs import with blotchy,
+    // broken normals that the rebuild fixes, so against the raw mesh they failed at every ratio,
+    // including no reduction at all. A 10,952-triangle screw (108 of them) goes the other way: the
+    // rebuild rings it with dark bands the import never had, while 0.35 looks like the import.
+    // When nothing passes, the part keeps an exact copy of the import, which is the one guaranteed
+    // to look like what was there.
+    private static MeshDecimator.Result SimplifyLookingTheSame(Mesh source, MeshDecimator.Options options,
+        DecimationVisualCheck check, out string verdict)
+    {
+        verdict = null;
+        float firstRatio = options.targetRatio;
+        Mesh rebuilt = null;
+        MeshDecimator.Result result = null;
+        try
+        {
+            options.targetRatio = 1f;
+            MeshDecimator.Result reference = MeshDecimator.Simplify(source, options);
+            if (!string.IsNullOrEmpty(reference.note)) return reference;
+            rebuilt = reference.mesh;
+
+            options.targetRatio = firstRatio;
+            result = MeshDecimator.Simplify(source, options);
+            if (LooksTheSame(check, source, rebuilt, result.mesh)) return result;
+
+            foreach (float ratio in GentlerRatios)
+            {
+                if (ratio <= firstRatio) continue;
+                Object.DestroyImmediate(result.mesh);
+                options.targetRatio = ratio;
+                result = MeshDecimator.Simplify(source, options);
+                if (!LooksTheSame(check, source, rebuilt, result.mesh)) continue;
+                verdict = GentlerVerdict;
+                return result;
+            }
+
+            // Nothing passed. UVs and tangents go unless asked for, same as a reduced mesh — nothing
+            // samples a texture, so they change nothing on screen.
+            Object.DestroyImmediate(result.mesh);
+            Mesh copy = Object.Instantiate(source);
+            copy.name = source.name;
+            if (!options.keepUv) copy.uv = new Vector2[0];
+            if (!options.recalculateTangents) copy.tangents = new Vector4[0];
+            verdict = FullDetailVerdict;
+            return result = new MeshDecimator.Result
+            {
+                mesh = copy,
+                sourceTriangles = result.sourceTriangles,
+                sourceVertices = result.sourceVertices,
+                triangles = result.sourceTriangles,
+                vertices = copy.vertexCount,
+            };
+        }
+        finally
+        {
+            options.targetRatio = firstRatio;
+            if (rebuilt != null) Object.DestroyImmediate(rebuilt);
+        }
+    }
+
+    private static bool LooksTheSame(DecimationVisualCheck check, Mesh source, Mesh rebuilt, Mesh candidate) =>
+        check.Score(source, candidate) <= LookLimit || check.Score(rebuilt, candidate) <= LookLimit;
 
     // Decimation reads vertex data, and Unity only keeps a CPU copy when the importer says to. This
     // turns Read/Write on for the source models, which forces a reimport of a 100 MB+ FBX and is the
