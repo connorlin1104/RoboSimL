@@ -18,6 +18,10 @@ using UnityEngine;
 // whole 3x3 neighbourhood is different too — that erosion throws away the 1 px edge shifts every
 // vertex move causes, and keeps a closed hole or a sliver, which are tens of pixels across.
 // The score is the WORST tile's different pixels over the pixels either image covers.
+//
+// AT A GIVEN SIZE: pass pixelsPerUnit and the tiles are instead cut at that on-screen density, so the
+// question becomes "does it look the same drawn THAT big". The home stage asks it that way: a part
+// that is a few dozen pixels on the turntable can lose detail its own close-up would show.
 public sealed class DecimationVisualCheck : System.IDisposable
 {
     private const int TileSize = 160;
@@ -36,7 +40,7 @@ public sealed class DecimationVisualCheck : System.IDisposable
 
     // Each reference's tiles, rendered once and compared against every candidate ratio. Holds the two
     // references of the part being reduced; a third mesh means the caller moved on, so it starts over.
-    private readonly Dictionary<Mesh, List<Tile>> cache = new Dictionary<Mesh, List<Tile>>();
+    private readonly Dictionary<(Mesh, float), List<Tile>> cache = new Dictionary<(Mesh, float), List<Tile>>();
 
     private struct Tile
     {
@@ -74,19 +78,21 @@ public sealed class DecimationVisualCheck : System.IDisposable
     }
 
     // 0 = identical pictures. Fraction of covered pixels that differ, in the worst tile.
-    public float Score(Mesh original, Mesh candidate)
+    // pixelsPerUnit: 0 tiles the part at its own detail; above 0, how many pixels one unit of the mesh
+    // covers where it will be seen.
+    public float Score(Mesh original, Mesh candidate, float pixelsPerUnit = 0f)
     {
-        if (!cache.TryGetValue(original, out List<Tile> tiles))
+        if (!cache.TryGetValue((original, pixelsPerUnit), out List<Tile> tiles))
         {
             if (cache.Count >= 2) cache.Clear();
-            tiles = Plan(original.bounds);
+            tiles = Plan(original.bounds, pixelsPerUnit);
             for (int i = 0; i < tiles.Count; i++)
             {
                 Tile t = tiles[i];
                 t.pixels = Render(t, original);
                 tiles[i] = t;
             }
-            cache[original] = tiles;
+            cache[(original, pixelsPerUnit)] = tiles;
         }
 
         float worst = 0f;
@@ -98,7 +104,7 @@ public sealed class DecimationVisualCheck : System.IDisposable
         return worst;
     }
 
-    private static List<Tile> Plan(Bounds bounds)
+    private static List<Tile> Plan(Bounds bounds, float pixelsPerUnit)
     {
         var tiles = new List<Tile>();
         Vector3 size = bounds.size;
@@ -107,7 +113,7 @@ public sealed class DecimationVisualCheck : System.IDisposable
         float radius = Mathf.Max(bounds.extents.magnitude, 1e-5f);
         // Middle dimension, so a channel is tiled along its length; floored so a long thin rod does
         // not turn into hundreds of tiles of nothing.
-        float tileWorld = Mathf.Max(dims[1], dims[2] / 30f, 1e-5f);
+        float tileWorld = pixelsPerUnit > 0f ? TileSize / pixelsPerUnit : Mathf.Max(dims[1], dims[2] / 30f, 1e-5f);
 
         foreach (Vector3 view in Views)
         {

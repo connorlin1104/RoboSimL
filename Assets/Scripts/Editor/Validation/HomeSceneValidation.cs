@@ -578,10 +578,11 @@ public static class HomeSceneValidation
                                   showcase.GetComponentsInChildren<Joint>(true).Length == 0, $"{who}'s showcase carries physics.");
             ValidationUtil.Assert(!RobotShowcase.NeedsStrip(showcase), $"{who}'s showcase carries something other than renderers.");
 
-            // The cull kept exactly the parts it should. Counting renderers stopped saying that when
-            // BuildShowcasePrefabs.MergeByMaterial landed — a correct showcase has one per material by
-            // construction — so the count is checked in triangles instead, which the merge preserves
-            // exactly and a mis-read source mesh would not.
+            // Geometry, in triangles: counting renderers stopped meaning anything when MergeByMaterial
+            // landed — one per material by construction. The showcase is reduced for the stage before the
+            // merge, so it can only draw fewer triangles than the parts its robot keeps, never more, and
+            // never none. The exact in = out count is the bake's own (MergeByMaterial), the one place the
+            // reduced parts still exist to be counted.
             MeshRenderer[] renderers = showcase.GetComponentsInChildren<MeshRenderer>(true);
             int triangles = 0;
             var materials = new HashSet<Material>();
@@ -597,8 +598,11 @@ public static class HomeSceneValidation
             }
 
             int expected = BuildShowcasePrefabs.ExpectedTriangles(entry.prefab);
-            ValidationUtil.Assert(triangles == expected,
-                $"{who}'s showcase draws {triangles:N0} triangles, but the parts its robot keeps have {expected:N0} — the merge lost geometry.");
+            ValidationUtil.Assert(triangles > 0 && triangles <= expected,
+                $"{who}'s showcase draws {triangles:N0} triangles, but the parts its robot keeps have {expected:N0} — " +
+                "a reduction can only remove, so the showcase is not made from this robot.");
+            ValidationUtil.Assert(triangles <= BuildShowcasePrefabs.TriangleLimit,
+                $"{who}'s showcase draws {triangles:N0} triangles, over the limit of {BuildShowcasePrefabs.TriangleLimit:N0}.");
 
             // The point of the merge: one draw per material, and no part left drawing on its own.
             ValidationUtil.Assert(renderers.Length == materials.Count,

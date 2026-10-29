@@ -24,6 +24,9 @@ using Object = UnityEngine.Object;
 //   - FLATTENED: every renderer moved up to the root and the CAD group nodes deleted. 654V_v2 is 5,645
 //     objects seventeen levels deep, and its showcase is about 740. That is prefab size and instantiate
 //     time — not per-frame cost, because the stage never moves the robot.
+//   - REDUCED FOR THE STAGE by ReduceForStage: each part as far as it still looks the same at the size
+//     the turntable draws it, which is much further than it can go and still survive a close-up on the
+//     field. 654V v3's driving meshes keep 2.2M triangles past the cull; its showcase needs far fewer.
 //   - MERGED to ONE DRAW PER MATERIAL by MergeByMaterial — 576 parts of 654V v3 become 2 meshes. This is
 //     the whole per-frame cost of the stage: measured on a phone, the home screen cost 15.84 ms of GPU a
 //     frame with the robot turning and 1.63 ms with it off (Docs/Device-Performance.md, 2026-09-17).
@@ -43,7 +46,7 @@ public static class BuildShowcasePrefabs
     // Bump when the bake itself changes — the cull rule, the flatten, anything that would make a fresh bake
     // of an unchanged robot come out different. It is part of each entry's showcaseSource, so a bump
     // re-bakes every robot on the next Build Home Screen instead of leaving old bakes in place.
-    private const string BakeVersion = "showcase-2";
+    private const string BakeVersion = "showcase-3";
 
     // What one showcase may cost, counted in PARTS KEPT — before MergeByMaterial folds them into one draw
     // per material. It stopped being a per-frame cost when the merge landed, but it is still the honest
@@ -64,6 +67,17 @@ public static class BuildShowcasePrefabs
     // the tool's default 0.08 (654V v3 lands near 750k) and far below any of them undecimated.
     public const int TriangleLimit = 1_500_000;
 
+    // The most pixels the stage ever spans the robot across: RobotStageView.maxTextureSize, the texture's
+    // longest side, with the robot's whole diameter fitted inside it. The real figure is smaller — the
+    // robot is usually framed by its height, and the phone's view is under the cap — so a part judged to
+    // look the same at this size looks the same on every screen.
+    private const float StagePixels = 1536f;
+
+    // Where ReduceForStage starts each part. The visual check is what stops it, so the decimator's own
+    // error ceiling is loosened well past ReduceRobotMeshes' default 0.004 rather than left to stop it first.
+    private const float StageRatio = 0.1f;
+    private const float StageMaxErrorFraction = 0.02f;
+
     // The CAD exporter's generic leaf names. Every renderer on the shipped robots sits on a "Body1".."BodyN"
     // leaf under the part it belongs to.
     private static readonly Regex GenericLeafName =
@@ -80,13 +94,14 @@ public static class BuildShowcasePrefabs
         public int renderersAfter;
         public int objectsAfter;
         public int triangles;
+        public int trianglesBeforeStage;
         public int vertices;
         public readonly List<string> warnings = new List<string>();
 
         public string Describe(string robot) =>
             $"  {robot}: {renderersBefore} -> {partsKept} parts ({fasteners} fastener, {hidden} hidden) -> " +
             $"{renderersAfter} draw{(renderersAfter == 1 ? string.Empty : "s")}, " +
-            $"{triangles:N0} triangles, {vertices:N0} vertices, {objectsAfter} objects, " +
+            $"{trianglesBeforeStage:N0} -> {triangles:N0} triangles for the stage, {vertices:N0} vertices, {objectsAfter} objects, " +
             $"{stripped} components stripped" +
             (keptNested > 0 ? $", {keptNested} were left nested before the merge" : string.Empty) +
             (partsKept > RendererBudget ? $" — OVER the {RendererBudget} part budget" : string.Empty) +
@@ -210,10 +225,9 @@ public static class BuildShowcasePrefabs
         return kept;
     }
 
-    // How many triangles a correct bake of this robot keeps. Validate Home Stage measures the merged
-    // meshes against it: once the parts are merged, counting renderers proves nothing — there is one per
-    // material by construction — but every triangle the cull kept still has to be there. Skips exactly
-    // what MergeByMaterial skips, or the two numbers would not be comparable.
+    // How many triangles the parts this robot keeps have BEFORE ReduceForStage — the most a correct bake
+    // can draw. Validate Home Stage holds the merged meshes under it. Skips exactly what MergeByMaterial
+    // skips, or the two numbers would not be comparable.
     internal static int ExpectedTriangles(GameObject source)
     {
         long indices = 0;
@@ -311,6 +325,7 @@ public static class BuildShowcasePrefabs
     private static Stats BakeOne(GameObject source, string path, string meshPath)
     {
         var stats = new Stats();
+        var stageMeshes = new List<Mesh>();
 
         // A preview scene, so the bake never touches — or dirties — whatever scene is open.
         Scene preview = EditorSceneManager.NewPreviewScene();
@@ -346,6 +361,7 @@ public static class BuildShowcasePrefabs
                 throw new InvalidOperationException(
                     $"{stats.partsKept} parts after the cull, over the limit of {RendererLimit}.");
 
+            ReduceForStage(copy, stats, stageMeshes);
             MergeByMaterial(copy, meshPath, stats);
             RobotShowcase.PrepareRenderers(copy);
 
@@ -365,7 +381,64 @@ public static class BuildShowcasePrefabs
         finally
         {
             EditorSceneManager.ClosePreviewScene(preview);
+            foreach (Mesh mesh in stageMeshes) Object.DestroyImmediate(mesh);
         }
+    }
+
+    // Swaps every part's mesh for one reduced as far as it still looks the same AT THE STAGE'S SIZE,
+    // before the merge copies it. ReduceRobotMeshes' own ladder and visual check, with the tiles cut at
+    // the pixels per unit the turntable can at most draw this part at (StagePixels over the robot's
+    // diameter, times the part's own scale). A mesh used by several parts is judged at the largest of
+    // their scales and reduced once. A part the decimator can't read keeps its mesh. The reduced meshes
+    // are added to `made` for the caller to destroy once the merge has copied them.
+    private static void ReduceForStage(GameObject copy, Stats stats, List<Mesh> made)
+    {
+        RobotShowcase.Frame frame = RobotShowcase.ComputeFrame(copy, null);
+        if (!frame.IsValid) return;
+        float pixelsPerWorldUnit = StagePixels / (2f * frame.radius);
+
+        var scales = new Dictionary<Mesh, float>();
+        var filters = new List<MeshFilter>();
+        foreach (MeshRenderer renderer in copy.GetComponentsInChildren<MeshRenderer>(true))
+        {
+            MeshFilter filter = renderer.GetComponent<MeshFilter>();
+            if (filter == null || filter.sharedMesh == null) continue;
+            Matrix4x4 m = filter.transform.localToWorldMatrix;
+            float scale = Mathf.Max(((Vector3)m.GetColumn(0)).magnitude, ((Vector3)m.GetColumn(1)).magnitude,
+                ((Vector3)m.GetColumn(2)).magnitude);
+            scales[filter.sharedMesh] = scales.TryGetValue(filter.sharedMesh, out float had) ? Mathf.Max(had, scale) : scale;
+            filters.Add(filter);
+            stats.trianglesBeforeStage += TriangleCount(filter.sharedMesh);
+        }
+
+        var options = new MeshDecimator.Options { targetRatio = StageRatio, maxErrorFraction = StageMaxErrorFraction };
+        var reduced = new Dictionary<Mesh, Mesh>();
+        using (var check = new DecimationVisualCheck())
+        {
+            int done = 0;
+            foreach (KeyValuePair<Mesh, float> entry in scales)
+            {
+                EditorUtility.DisplayProgressBar(Title, $"Reducing {entry.Key.name} for the stage", done++ / (float)scales.Count);
+                MeshDecimator.Result result = ReduceRobotMeshes.SimplifyLookingTheSame(entry.Key, options, check,
+                    out _, pixelsPerWorldUnit * entry.Value);
+                if (result.mesh == null || result.mesh == entry.Key) continue;
+                made.Add(result.mesh);
+                reduced[entry.Key] = result.mesh;
+            }
+            EditorUtility.ClearProgressBar();
+        }
+
+        foreach (MeshFilter filter in filters)
+        {
+            if (reduced.TryGetValue(filter.sharedMesh, out Mesh mesh)) filter.sharedMesh = mesh;
+        }
+    }
+
+    private static int TriangleCount(Mesh mesh)
+    {
+        long indices = 0;
+        for (int sub = 0; sub < mesh.subMeshCount; sub++) indices += mesh.GetIndexCount(sub);
+        return (int)(indices / 3);
     }
 
     // ONE DRAW PER MATERIAL, instead of one per CAD part.
@@ -430,8 +503,8 @@ public static class BuildShowcasePrefabs
         long totalTriangles = totalIndices / 3;
         if (totalTriangles > TriangleLimit)
             throw new InvalidOperationException(
-                $"{totalTriangles:N0} triangles, over the limit of {TriangleLimit:N0} — this robot's meshes " +
-                "have not been reduced. Run Tools > RoboSim > Robot > Reduce Robot Meshes on it first " +
+                $"{totalTriangles:N0} triangles even reduced for the stage, over the limit of {TriangleLimit:N0}. " +
+                "Run Tools > RoboSim > Robot > Reduce Robot Meshes on it first " +
                 "(colliders are untouched, so it cannot change how the robot drives). Merging raw CAD here " +
                 "writes a second copy of every triangle: measured, that is 218-230 MB for one robot.");
 
