@@ -6,3 +6,6 @@
 # YAML with its vertex buffer inline as hex — megabytes per robot of data that is never read as text,
 # never merged, and regenerated rather than edited. LFS is exactly the right place for it.
 Assets/RobotMeshes/**/*.asset filter=lfs diff=lfs merge=lfs -text
+# The home stage's merged showcase meshes, the same kind of generated mesh (BuildShowcasePrefabs):
+# 654V v3's is 77 MB of hex, past GitHub's 50 MB warning, and re-written on every re-bake.
+Assets/UI/Showcase/*_ShowcaseMeshes.asset filter=lfs diff=lfs merge=lfs -text
