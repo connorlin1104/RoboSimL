@@ -78,6 +78,13 @@ public static class BuildShowcasePrefabs
     private const float StageRatio = 0.1f;
     private const float StageMaxErrorFraction = 0.02f;
 
+    // How much of a tile may differ at stage size, strictest first; a robot only moves to the next if the
+    // one before leaves it over TriangleLimit. Measured: 654V v1, v2 and v3 fit at 1 %, and at 2 % v2's
+    // black plate loses its holes on the full view, so 2 % is not for everyone. The 360 RPM Drivetrain,
+    // the smallest robot and so the one drawn largest, is 2.38M at 1 % and 1.35M at 2 %, which matches at
+    // stage size. 5 % is 0.54M and visibly shreds its c-channels, so the ladder stops at 2 %.
+    private static readonly float[] StageLookLimits = { 0.01f, 0.02f };
+
     // The CAD exporter's generic leaf names. Every renderer on the shipped robots sits on a "Body1".."BodyN"
     // leaf under the part it belongs to.
     private static readonly Regex GenericLeafName =
@@ -389,8 +396,10 @@ public static class BuildShowcasePrefabs
     // before the merge copies it. ReduceRobotMeshes' own ladder and visual check, with the tiles cut at
     // the pixels per unit the turntable can at most draw this part at (StagePixels over the robot's
     // diameter, times the part's own scale). A mesh used by several parts is judged at the largest of
-    // their scales and reduced once. A part the decimator can't read keeps its mesh. The reduced meshes
-    // are added to `made` for the caller to destroy once the merge has copied them.
+    // their scales and reduced once. A part the decimator can't read keeps its mesh. The whole robot is
+    // tried at each of StageLookLimits until it fits TriangleLimit; the last is kept either way, and
+    // MergeByMaterial refuses it if it is still over. The reduced meshes are added to `made` for the
+    // caller to destroy once the merge has copied them.
     private static void ReduceForStage(GameObject copy, Stats stats, List<Mesh> made)
     {
         RobotShowcase.Frame frame = RobotShowcase.ComputeFrame(copy, null);
@@ -415,19 +424,29 @@ public static class BuildShowcasePrefabs
         var reduced = new Dictionary<Mesh, Mesh>();
         using (var check = new DecimationVisualCheck())
         {
-            int done = 0;
-            foreach (KeyValuePair<Mesh, float> entry in scales)
+            foreach (float limit in StageLookLimits)
             {
-                EditorUtility.DisplayProgressBar(Title, $"Reducing {entry.Key.name} for the stage", done++ / (float)scales.Count);
-                MeshDecimator.Result result = ReduceRobotMeshes.SimplifyLookingTheSame(entry.Key, options, check,
-                    out _, pixelsPerWorldUnit * entry.Value);
-                if (result.mesh == null || result.mesh == entry.Key) continue;
-                made.Add(result.mesh);
-                reduced[entry.Key] = result.mesh;
+                foreach (Mesh mesh in reduced.Values) Object.DestroyImmediate(mesh);
+                reduced.Clear();
+
+                int done = 0;
+                foreach (KeyValuePair<Mesh, float> entry in scales)
+                {
+                    EditorUtility.DisplayProgressBar(Title, $"Reducing {entry.Key.name} for the stage", done++ / (float)scales.Count);
+                    MeshDecimator.Result result = ReduceRobotMeshes.SimplifyLookingTheSame(entry.Key, options, check,
+                        out _, pixelsPerWorldUnit * entry.Value, limit);
+                    if (result.mesh != null && result.mesh != entry.Key) reduced[entry.Key] = result.mesh;
+                }
+
+                long total = 0;
+                foreach (MeshFilter filter in filters)
+                    total += TriangleCount(reduced.TryGetValue(filter.sharedMesh, out Mesh mesh) ? mesh : filter.sharedMesh);
+                if (total <= TriangleLimit) break;
             }
             EditorUtility.ClearProgressBar();
         }
 
+        made.AddRange(reduced.Values);
         foreach (MeshFilter filter in filters)
         {
             if (reduced.TryGetValue(filter.sharedMesh, out Mesh mesh)) filter.sharedMesh = mesh;

@@ -333,7 +333,7 @@ public static class ReduceRobotMeshes
     // to look like what was there.
     // pixelsPerUnit: see DecimationVisualCheck.Score. The showcase bake passes the turntable's.
     internal static MeshDecimator.Result SimplifyLookingTheSame(Mesh source, MeshDecimator.Options options,
-        DecimationVisualCheck check, out string verdict, float pixelsPerUnit = 0f)
+        DecimationVisualCheck check, out string verdict, float pixelsPerUnit = 0f, float lookLimit = LookLimit)
     {
         verdict = null;
         float firstRatio = options.targetRatio;
@@ -348,7 +348,7 @@ public static class ReduceRobotMeshes
 
             options.targetRatio = firstRatio;
             result = MeshDecimator.Simplify(source, options);
-            if (LooksTheSame(check, source, rebuilt, result.mesh, pixelsPerUnit)) return result;
+            if (LooksTheSame(check, source, rebuilt, result.mesh, pixelsPerUnit, lookLimit)) return result;
 
             foreach (float ratio in GentlerRatios)
             {
@@ -356,7 +356,7 @@ public static class ReduceRobotMeshes
                 Object.DestroyImmediate(result.mesh);
                 options.targetRatio = ratio;
                 result = MeshDecimator.Simplify(source, options);
-                if (!LooksTheSame(check, source, rebuilt, result.mesh, pixelsPerUnit)) continue;
+                if (!LooksTheSame(check, source, rebuilt, result.mesh, pixelsPerUnit, lookLimit)) continue;
                 verdict = GentlerVerdict;
                 return result;
             }
@@ -386,8 +386,8 @@ public static class ReduceRobotMeshes
     }
 
     private static bool LooksTheSame(DecimationVisualCheck check, Mesh source, Mesh rebuilt, Mesh candidate,
-        float pixelsPerUnit) =>
-        check.Score(source, candidate, pixelsPerUnit) <= LookLimit || check.Score(rebuilt, candidate, pixelsPerUnit) <= LookLimit;
+        float pixelsPerUnit, float lookLimit) =>
+        check.Score(source, candidate, pixelsPerUnit) <= lookLimit || check.Score(rebuilt, candidate, pixelsPerUnit) <= lookLimit;
 
     // Decimation reads vertex data, and Unity only keeps a CPU copy when the importer says to. This
     // turns Read/Write on for the source models, which forces a reimport of a 100 MB+ FBX and is the
