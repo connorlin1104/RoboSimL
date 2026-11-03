@@ -189,8 +189,8 @@ public class ClawRig : MonoBehaviour
     [Header("Flip cylinder (cosmetic)")]
     public GameObject flipCylinderBody;
     public GameObject flipCylinderRod;
-    [Tooltip("Cylinder stroke in millimetres — the real VEX classes are 20 / 50 / 90.")]
-    public float flipStrokeMm = 90f;
+    [Tooltip("Cylinder stroke in millimetres — the real VEX classes are 25 / 50 / 75.")]
+    public float flipStrokeMm = 75f;
     [Tooltip("How much of the travel the BODY takes instead of the rod. 0 = barrel bolted down, " +
              "0.5 = balanced (the cylinder's midpoint holds still), 1 = the barrel does all the moving.")]
     [Range(0f, 1f)] public float flipRecoil = 0.5f;

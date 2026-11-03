@@ -1034,7 +1034,7 @@ MonoBehaviour:
   displayName: Endgame Mech
   barrel: {fileID: 7890072482061637339}
   alsoMove: []
-  strokeMm: 90
+  strokeMm: 75
   retractedDeg: 0
   extendedDeg: 90
   axisPreset: 0
@@ -55835,7 +55835,7 @@ MonoBehaviour:
   displayName: Doinker
   barrel: {fileID: 3689787093057520484}
   alsoMove: []
-  strokeMm: 90
+  strokeMm: 75
   retractedDeg: -90
   extendedDeg: 0
   axisPreset: 0

@@ -232326,7 +232326,7 @@ MonoBehaviour:
   flipLink: {fileID: 7538184681047031635}
   flipCylinderBody: {fileID: 0}
   flipCylinderRod: {fileID: 0}
-  flipStrokeMm: 20
+  flipStrokeMm: 25
   flipRecoil: 0.5
   flipCylinderReverse: 0
   clampSections:
@@ -232353,7 +232353,7 @@ MonoBehaviour:
   clampDamping: 500
   clampCylinderBody: {fileID: 4883533608041966797}
   clampCylinderRod: {fileID: 5796851305283353651}
-  clampStrokeMm: 20
+  clampStrokeMm: 25
   clampRecoil: 0.5
   clampCylinderReverse: 1
   enableGrab: 1
