@@ -72,13 +72,16 @@ parts each, built from two material *assets*, which reads like a draw-call probl
 
 ### Free while you are in there
 
-- `LiteScene`'s camera has `m_RenderPostProcessing: 1` (`LiteScene.unity:2899`) and the scene's
-  Volume points at `DefaultVolumeProfile` — where **every effect is neutral**: Tonemapping `None`,
-  Bloom intensity 0, DoF `Off`, every other intensity 0
-  - So the app pays for a post chain that does nothing: an intermediate colour buffer instead of
-    rendering straight to the backbuffer (expensive on a tile GPU), and a full-screen blit
-  - `m_SupportsHDR: 1` makes that intermediate FP16, doubling its bandwidth, for effects that are off
-  - Turn both off and check a screenshot is identical. It should be
+- **Post-processing — CORRECTED 2026-11-02, the first read was wrong.** The field scenes' Volume
+  points at `SampleSceneProfile`, not `DefaultVolumeProfile`, and it is NOT neutral: Neutral
+  tonemapping, Bloom 0.25 (threshold 1), Vignette 0.2
+  - Turning post and HDR off was tried and rendered: the field comes out ~7 % brighter with the
+    walls and tape blown to white. Not the same picture, so post and HDR stay on
+  - **Bloom is off** (`SampleSceneProfile.asset`). Rendered A/B: 0.24 % of pixels move by more than
+    2/255, all of it a faint glow along the bright tape lines. Bloom is the multi-pass part of the
+    chain (prefilter plus a down/up-sample pyramid), so it is the one worth paying nothing for
+  - Tonemapping and vignette stay: both run inside the one uber pass the chain needs anyway, and
+    tonemapping needs the HDR buffer. Render scale 0.8 means there is an intermediate buffer either way
 - All 752 LiteScene renderers have `m_ReceiveShadows: 1`, including ones nothing can shadow
 
 ## 1. The field drops to 30 fps after four minutes of driving
