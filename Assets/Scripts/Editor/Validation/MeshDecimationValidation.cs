@@ -50,6 +50,7 @@ public static class MeshDecimationValidation
         CheckSizeIsKept(checks);
         CheckNoBrokenTriangles(checks);
         CheckSharpEdgesStaySharp(checks);
+        CheckSourceNormalsCarried(checks);
         CheckSubmeshesSurvive(checks);
         CheckLimits(checks);
         CheckSourceIsNotModified(checks);
@@ -245,6 +246,76 @@ public static class MeshDecimationValidation
         checks.That(smooth.mesh.vertexCount < sharp.mesh.vertexCount,
             $"Smoothing everything did not reduce the vertex count ({smooth.mesh.vertexCount} vs " +
             $"{sharp.mesh.vertexCount}).");
+    }
+
+    // keepSourceNormals exists because rebuilding normals by angle made an UNREDUCED field part shade
+    // differently from its import, so the look check failed it at every ratio. Three things it must do:
+    //  - with nothing removed, hand back the import's normals exactly. A coarse ball whose faces are
+    //    60 degrees apart is the test: the angle rebuild flat-shades it, the import says it is round
+    //  - keep a hard edge hard: a flat-shaded cube still has its six face normals
+    //  - after a real reduction, stay close to the import's shading. A collapse moves faces onto a
+    //    spot whose normal is different; without picking up the normal already there, the ball's
+    //    shading drifts by up to a whole facet
+    private static void CheckSourceNormalsCarried(ValidationUtil.Checks checks)
+    {
+        MeshDecimator.Options Carry(float ratio)
+        {
+            MeshDecimator.Options o = Options(ratio, 1f);
+            o.keepSourceNormals = true;
+            return o;
+        }
+
+        MeshDecimator.Result coarse = MeshDecimator.Simplify(RoundBall(6, 4), Carry(1f));
+        float worst = WorstRadialAngle(coarse.mesh);
+        checks.That(worst < 0.1f,
+            $"With nothing removed, a ball imported with round normals came back {worst:F1} degrees off " +
+            "them — the import's normals were not carried, so an unreduced part shades differently.");
+        checks.That(coarse.mesh.vertexCount == 6 * 3 + 2,
+            $"The round ball came back with {coarse.mesh.vertexCount} vertices, expected 20 (one per " +
+            "position): corners that share a normal were split anyway.");
+
+        MeshDecimator.Result cube = MeshDecimator.Simplify(Cube(), Carry(1f));
+        checks.That(DistinctNormals(cube.mesh) == 6 && cube.mesh.vertexCount == 24,
+            $"Carrying a flat cube's normals gave {DistinctNormals(cube.mesh)} distinct normals on " +
+            $"{cube.mesh.vertexCount} vertices, expected 6 on 24: a hard edge went soft.");
+
+        MeshDecimator.Result reduced = MeshDecimator.Simplify(RoundBall(32, 16), Carry(0.25f));
+        float reducedWorst = WorstRadialAngle(reduced.mesh);
+        checks.That(reduced.TriangleRatio < 0.5f,
+            $"The round ball only reduced to {reduced.TriangleRatio:P0}, so the next check proves nothing.");
+        checks.That(reducedWorst < 6f,
+            $"After reducing a round ball to {reduced.TriangleRatio:P0}, a normal is {reducedWorst:F1} " +
+            "degrees off the import's: moved faces kept the normal of the point they left.");
+    }
+
+    // A sphere with the normals an importer gives a round thing: each one points straight out.
+    private static Mesh RoundBall(int segments, int rings)
+    {
+        Mesh mesh = Sphere(segments, rings);
+        Vector3[] positions = mesh.vertices;
+        var normals = new Vector3[positions.Length];
+        for (int i = 0; i < positions.Length; i++)
+        {
+            // Sphere's poles are not one point: sin(pi) is 8.7e-8, not 0, and 0 * a negative cosine
+            // is -0, so each pole is a ring of near-coincident points and a pinhole. Shut both, so the
+            // ball is closed and the checks measure normals rather than a rim.
+            if (Mathf.Abs(positions[i].x) < 1e-5f && Mathf.Abs(positions[i].z) < 1e-5f)
+                positions[i] = new Vector3(0f, Mathf.Sign(positions[i].y), 0f);
+            normals[i] = positions[i].normalized;
+        }
+        mesh.vertices = positions;
+        mesh.normals = normals;
+        return mesh;
+    }
+
+    private static float WorstRadialAngle(Mesh mesh)
+    {
+        Vector3[] positions = mesh.vertices;
+        Vector3[] normals = mesh.normals;
+        float worst = 0f;
+        for (int i = 0; i < positions.Length; i++)
+            worst = Mathf.Max(worst, Vector3.Angle(normals[i], positions[i].normalized));
+        return worst;
     }
 
     // Submesh index is what picks the material. Lose it and a robot comes back one colour, or with
