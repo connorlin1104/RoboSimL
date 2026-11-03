@@ -588,6 +588,48 @@ public static class PerfOverlayValidation
         // The check has to be able to fail: a panel left at the home screen's spot, on top of L1.
         checks.Refuses(() => Throw(ClusterProblem(RoboSimPaths.LiteScene, PerfOverlay.HomePosition, PerfOverlay.PanelWidth)),
             "a panel that stayed in the home screen's corner, on top of L1");
+        MovedControls(checks);
+    }
+
+    // The layout is the player's, so the panel has to dodge controls wherever they were dragged (Connor's phone,
+    // 2026-09-17: it sat on L1/L2). ClearSpot in canvas units from the top-left, y down; a 1920x1080 canvas and a
+    // 160x200 panel, about the readout's real size.
+    private static void MovedControls(ValidationUtil.Checks checks)
+    {
+        var canvas = new Vector2(1920f, 1080f);
+        var panel = new Vector2(PerfOverlay.PanelWidth, 200f);
+        // The default L1/L2 and R1/R2 (40 in, 204 down) and the two joysticks low on each side.
+        var defaults = new List<Rect>
+        {
+            new Rect(40f, 40f, 180f, 164f), new Rect(1700f, 40f, 180f, 164f),
+            new Rect(50f, 700f, 300f, 300f), new Rect(1570f, 700f, 300f, 300f),
+        };
+        Vector2 home = PerfOverlay.ClearSpot(defaults, canvas, panel);
+        checks.That(home == PerfOverlay.FieldPosition,
+            $"With the default layout the panel went to ({home.x:0}, {home.y:0}) instead of under L1/L2 at {PerfOverlay.FieldPosition}.");
+
+        // L1/L2 dragged down over that spot, and the Free Cam button parked in the top-left corner.
+        var moved = new List<Rect>(defaults) { new Rect(40f, 260f, 180f, 164f), new Rect(30f, 30f, 200f, 90f) };
+        Vector2 dodged = PerfOverlay.ClearSpot(moved, canvas, panel);
+        string hit = Covering(moved, dodged, panel);
+        checks.That(hit == null, $"With L1/L2 dragged under the corner the panel went to ({dodged.x:0}, {dodged.y:0}), on {hit}.");
+        // ...and this check has to be able to fail: the old fixed spot sits on the dragged L1/L2.
+        checks.Refuses(() => Throw(Covering(moved, PerfOverlay.FieldPosition, panel)), "the old fixed spot, under dragged L1/L2");
+
+        // Nowhere clear: it still has to land somewhere, and on the least-covered spot rather than the first.
+        var everywhere = new List<Rect> { new Rect(0f, 0f, 1920f, 1080f), new Rect(0f, 0f, 400f, 600f) };
+        Vector2 cramped = PerfOverlay.ClearSpot(everywhere, canvas, panel);
+        checks.That(cramped != PerfOverlay.FieldPosition,
+            $"With every spot covered the panel stayed at the first one ({cramped.x:0}, {cramped.y:0}), under the most controls.");
+    }
+
+    // What the panel at `position` (anchoredPosition, top-left pivot) would overlap, or null.
+    private static string Covering(List<Rect> controls, Vector2 position, Vector2 panel)
+    {
+        var rect = new Rect(position.x, -position.y, panel.x, panel.y);
+        foreach (Rect control in controls)
+            if (rect.Overlaps(control)) return $"a control at ({control.x:0}, {control.y:0}) {control.width:0}x{control.height:0}";
+        return null;
     }
 
     // Null when a panel at `position` is clear of the scene's L1/L2 cluster: wholly below it or wholly beside it.

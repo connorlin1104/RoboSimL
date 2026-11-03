@@ -14,7 +14,7 @@ using UnityEngine;
 // HOW: orthographic views from the six axes and four diagonals, each TILED so a tile is about as wide
 // as the part's middle dimension. That keeps a long channel's holes ~30 px across instead of letting
 // them shrink to a pixel in one whole-part shot, where a closed hole would vanish from the score.
-// A pixel is "different" when any channel moves by more than PixelTolerance, and only counts if its
+// A pixel is "different" when any channel moves by more than the pixel tolerance, and only counts if its
 // whole 3x3 neighbourhood is different too — that erosion throws away the 1 px edge shifts every
 // vertex move causes, and keeps a closed hole or a sliver, which are tens of pixels across.
 // The score is the WORST tile's different pixels over the pixels either image covers.
@@ -25,7 +25,11 @@ using UnityEngine;
 public sealed class DecimationVisualCheck : System.IDisposable
 {
     private const int TileSize = 160;
-    private const int PixelTolerance = 48;
+    // 48 was set on the robots, where the failures are holes and slivers. The field's goals are covered
+    // in engraved lines a few pixels wide and soft highlights, and at 48 those changed visibly while
+    // the part still scored 0.13 % — so the field asks with a smaller tolerance (ReduceFieldMeshes).
+    public const int RobotPixelTolerance = 48;
+    private readonly int pixelTolerance;
     private const int MaxTilesPerView = 40;
     private const float MinCoverage = 0.01f;
 
@@ -51,8 +55,9 @@ public sealed class DecimationVisualCheck : System.IDisposable
         public Color32[] pixels;
     }
 
-    public DecimationVisualCheck()
+    public DecimationVisualCheck(int pixelTolerance = RobotPixelTolerance)
     {
+        this.pixelTolerance = pixelTolerance;
         preview = new PreviewRenderUtility();
         preview.camera.orthographic = true;
         preview.camera.clearFlags = CameraClearFlags.SolidColor;
@@ -103,6 +108,20 @@ public sealed class DecimationVisualCheck : System.IDisposable
         }
         return worst;
     }
+
+    // The density a part is tiled at by default (pixelsPerUnit 0): one tile across its middle dimension.
+    public static float DefaultPixelsPerUnit(Bounds bounds)
+    {
+        Vector3 size = bounds.size;
+        float[] dims = { size.x, size.y, size.z };
+        System.Array.Sort(dims);
+        return TileSize / Mathf.Max(dims[1], dims[2] / 30f, 1e-5f);
+    }
+
+    // For Score: look at the part at least `pixelsPerUnit` close. A small part's own tiling is already
+    // finer than that and is kept (0); a big one is looked at as close as it can be seen.
+    public static float AtLeast(Bounds bounds, float pixelsPerUnit) =>
+        pixelsPerUnit > DefaultPixelsPerUnit(bounds) ? pixelsPerUnit : 0f;
 
     private static List<Tile> Plan(Bounds bounds, float pixelsPerUnit)
     {
@@ -175,7 +194,7 @@ public sealed class DecimationVisualCheck : System.IDisposable
         return pixels;
     }
 
-    private static float Compare(Color32[] a, Color32[] b)
+    private float Compare(Color32[] a, Color32[] b)
     {
         int n = TileSize;
         var bad = new bool[a.Length];
@@ -184,9 +203,9 @@ public sealed class DecimationVisualCheck : System.IDisposable
         {
             bool inA = a[i].r + a[i].g + a[i].b > 6, inB = b[i].r + b[i].g + b[i].b > 6;
             if (inA || inB) covered++;
-            bad[i] = Mathf.Abs(a[i].r - b[i].r) > PixelTolerance
-                  || Mathf.Abs(a[i].g - b[i].g) > PixelTolerance
-                  || Mathf.Abs(a[i].b - b[i].b) > PixelTolerance;
+            bad[i] = Mathf.Abs(a[i].r - b[i].r) > pixelTolerance
+                  || Mathf.Abs(a[i].g - b[i].g) > pixelTolerance
+                  || Mathf.Abs(a[i].b - b[i].b) > pixelTolerance;
         }
         if (covered < MinCoverage * a.Length) return 0f;
 

@@ -321,7 +321,7 @@ public static class ReduceRobotMeshes
     private const float LookLimit = 0.01f;
 
     private const string GentlerVerdict = "gentler ratio to look the same";
-    private const string FullDetailVerdict = "every triangle kept, reducing it showed";
+    internal const string FullDetailVerdict = "every triangle kept, reducing it showed";
 
     // A reduction passes if it looks like EITHER of two references: the raw import, or the part run
     // through the decimator with nothing removed (welded, normals rebuilt, every triangle kept).
@@ -333,8 +333,10 @@ public static class ReduceRobotMeshes
     // to look like what was there.
     // pixelsPerUnit: see DecimationVisualCheck.Score. The showcase bake passes the turntable's.
     internal static MeshDecimator.Result SimplifyLookingTheSame(Mesh source, MeshDecimator.Options options,
-        DecimationVisualCheck check, out string verdict, float pixelsPerUnit = 0f, float lookLimit = LookLimit)
+        DecimationVisualCheck check, out string verdict, float pixelsPerUnit = 0f, float lookLimit = LookLimit,
+        float[] gentlerRatios = null)
     {
+        gentlerRatios ??= GentlerRatios;
         verdict = null;
         float firstRatio = options.targetRatio;
         Mesh rebuilt = null;
@@ -350,7 +352,7 @@ public static class ReduceRobotMeshes
             result = MeshDecimator.Simplify(source, options);
             if (LooksTheSame(check, source, rebuilt, result.mesh, pixelsPerUnit, lookLimit)) return result;
 
-            foreach (float ratio in GentlerRatios)
+            foreach (float ratio in gentlerRatios)
             {
                 if (ratio <= firstRatio) continue;
                 Object.DestroyImmediate(result.mesh);
@@ -393,7 +395,7 @@ public static class ReduceRobotMeshes
     // turns Read/Write on for the source models, which forces a reimport of a 100 MB+ FBX and is the
     // slow part of the whole operation, then puts the setting back so builds don't carry the extra
     // copy. Returns the paths it changed.
-    private static List<string> MakeReadable(List<Mesh> meshes)
+    internal static List<string> MakeReadable(List<Mesh> meshes)
     {
         var changed = new List<string>();
         var considered = new HashSet<string>();
@@ -412,7 +414,7 @@ public static class ReduceRobotMeshes
         return changed;
     }
 
-    private static void RestoreReadable(List<string> paths)
+    internal static void RestoreReadable(List<string> paths)
     {
         foreach (string path in paths)
         {
@@ -435,7 +437,7 @@ public static class ReduceRobotMeshes
 
     // CAD exports name half a robot "Body1", so the mesh name alone collides constantly and
     // CreateAsset would overwrite the previous one without a word.
-    private static string UniqueName(string name, HashSet<string> used)
+    internal static string UniqueName(string name, HashSet<string> used)
     {
         string stem = Sanitize(string.IsNullOrWhiteSpace(name) ? "Mesh" : name);
         if (used.Add(stem)) return stem;

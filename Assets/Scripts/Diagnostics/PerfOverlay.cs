@@ -42,9 +42,16 @@ public class PerfOverlay : MonoBehaviour
     // there it steps straight down under them. It is thin because of the home title, which slides into the corner's row
     // as Settings opens: on a 4:3 iPad, the narrowest screen, its first letter stops about 232 in, and the panel ends at
     // 200. Validate Performance Overlay works both out from the scenes.
+    //
+    // In a game that spot is only the first choice. The controls are player-configurable (Controls Layout drags every
+    // button anywhere), so no fixed spot is clear for everyone — on Connor's phone the panel sat on L1/L2. Once a second
+    // the panel looks at where the field's controls and buttons actually are and takes the first spot in FieldSpots that
+    // none of them touch (ClearSpot).
     public static readonly Vector2 HomePosition = new Vector2(40f, -40f);
     public static readonly Vector2 FieldPosition = new Vector2(40f, -228f);
     public const float PanelWidth = 160f;
+    // Gap kept between the panel and any control, in canvas units.
+    public const float ControlMargin = 12f;
 
     private const float FontSize = 22f;
     private const float Padding = 10f;
@@ -117,6 +124,9 @@ public class PerfOverlay : MonoBehaviour
     private string firstFramePending;
     private Scene currentScene;
     private RobotStageView stageView;
+    // What the panel keeps clear of in a game: the field's buttons and the six movable control groups.
+    private readonly List<RectTransform> obstacles = new List<RectTransform>();
+    private readonly List<Rect> obstacleRects = new List<Rect>();
 
     private double launchFirstFrame = -1;
     private double launchRobot = -1;
@@ -274,6 +284,9 @@ public class PerfOverlay : MonoBehaviour
         if (firstFramePending == null) return;
         string scene = firstFramePending;
         firstFramePending = null;
+        // Again now that every Start has run: ControlsAppearance moves the controls to the player's layout in its own.
+        FindObstacles();
+        Layout();
         FirstFrame(scene);
     }
 
@@ -283,6 +296,7 @@ public class PerfOverlay : MonoBehaviour
         parts.panel.anchoredPosition = sceneName == HomeSceneName ? HomePosition : FieldPosition;
         // For the log's stage column. Settings > Robot > Performance is where the stage is switched.
         stageView = FindAnyObjectByType<RobotStageView>(FindObjectsInactive.Include);
+        FindObstacles();
         Layout();
     }
 
@@ -397,6 +411,86 @@ public class PerfOverlay : MonoBehaviour
         parts.labels.rectTransform.sizeDelta = column;
         parts.values.rectTransform.sizeDelta = column;
         parts.panel.sizeDelta = new Vector2(PanelWidth, Padding * 2f + textHeight);
+        if (sceneName != HomeSceneName) Place();
+    }
+
+    // --- Keeping clear of the controls, in a game ---
+
+    // Every button in the scene (Home, Reset, Match Load, Free Cam, the pads and shoulders) plus the six control groups by
+    // name, which covers the joysticks: a joystick is not a Selectable. Found once per scene; which of them is showing is
+    // read each time, so on-screen controls hidden for a gamepad free their space.
+    private void FindObstacles()
+    {
+        obstacles.Clear();
+        if (sceneName == HomeSceneName) return;
+        foreach (Selectable selectable in FindObjectsByType<Selectable>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            if (selectable.transform is RectTransform rect && rect.GetComponentInParent<Canvas>(true) != parts.canvas) obstacles.Add(rect);
+        var groups = new HashSet<string>();
+        foreach (ControlsLayout.ControlInfo control in ControlsLayout.Controls) groups.Add(control.name);
+        foreach (RectTransform rect in FindObjectsByType<RectTransform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            if (groups.Contains(rect.name)) obstacles.Add(rect);
+    }
+
+    private void Place()
+    {
+        var canvasRect = (RectTransform)parts.canvas.transform;
+        float scale = parts.canvas.scaleFactor;
+        if (scale <= 0f) return;
+        obstacleRects.Clear();
+        var corners = new Vector3[4];
+        foreach (RectTransform rect in obstacles)
+        {
+            if (rect == null || !rect.gameObject.activeInHierarchy) continue;
+            Canvas canvas = rect.GetComponentInParent<Canvas>();
+            if (canvas == null || !canvas.isActiveAndEnabled) continue;
+            Camera cam = canvas.rootCanvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.rootCanvas.worldCamera;
+            rect.GetWorldCorners(corners);
+            Vector2 min = new Vector2(float.MaxValue, float.MaxValue), max = new Vector2(float.MinValue, float.MinValue);
+            foreach (Vector3 corner in corners)
+            {
+                Vector2 screen = RectTransformUtility.WorldToScreenPoint(cam, corner);
+                min = Vector2.Min(min, screen);
+                max = Vector2.Max(max, screen);
+            }
+            // Screen pixels (origin bottom-left) to this canvas's units measured down from the top-left.
+            obstacleRects.Add(Rect.MinMaxRect(min.x / scale, (Screen.height - max.y) / scale, max.x / scale, (Screen.height - min.y) / scale));
+        }
+        parts.panel.anchoredPosition = ClearSpot(obstacleRects, canvasRect.rect.size, parts.panel.sizeDelta);
+    }
+
+    // Where the panel goes in a game, as its anchoredPosition (top-left pivot): the first spot in this order whose panel,
+    // grown by ControlMargin, touches none of `controls`; if every spot touches something, the one that covers least.
+    // Everything is in this canvas's units measured from the top-left corner with y running DOWN, which is how both the
+    // controls and the panel are easiest to read off a screenshot. Under L1/L2 first, which is where the default layout
+    // leaves room; then the top-left corner; the top middle; the top-right corner and under R1/R2; the two side middles.
+    public static Vector2 ClearSpot(IReadOnlyList<Rect> controls, Vector2 canvasSize, Vector2 panelSize)
+    {
+        float edge = HomePosition.x, under = -FieldPosition.y;
+        float right = canvasSize.x - edge - panelSize.x, middleX = (canvasSize.x - panelSize.x) * 0.5f;
+        float middleY = (canvasSize.y - panelSize.y) * 0.5f;
+        Vector2[] spots =
+        {
+            new Vector2(edge, under), new Vector2(edge, edge), new Vector2(middleX, edge),
+            new Vector2(right, edge), new Vector2(right, under), new Vector2(edge, middleY), new Vector2(right, middleY),
+        };
+
+        Vector2 best = spots[0];
+        float leastCovered = float.MaxValue;
+        foreach (Vector2 spot in spots)
+        {
+            var panel = new Rect(spot.x - ControlMargin, spot.y - ControlMargin,
+                panelSize.x + ControlMargin * 2f, panelSize.y + ControlMargin * 2f);
+            float covered = 0f;
+            foreach (Rect control in controls)
+            {
+                float w = Mathf.Min(panel.xMax, control.xMax) - Mathf.Max(panel.xMin, control.xMin);
+                float h = Mathf.Min(panel.yMax, control.yMax) - Mathf.Max(panel.yMin, control.yMin);
+                if (w > 0f && h > 0f) covered += w * h;
+            }
+            if (covered <= 0f) return new Vector2(spot.x, -spot.y);
+            if (covered < leastCovered) { leastCovered = covered; best = spot; }
+        }
+        return new Vector2(best.x, -best.y);
     }
 
     // The TextMesh Pro default, LiberationSans, whose digits are all one width — the numbers change every second and

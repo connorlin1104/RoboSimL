@@ -61,9 +61,22 @@ parts each, built from two material *assets*, which reads like a draw-call probl
    - At 0.08, 654V v3 goes from 9.37M drawn triangles to roughly 750k, and 226 MB to roughly 18 MB
 2. **Re-run run 2 on the phone** (10 min, robot `Turning`). The `gpu` number is the whole
    experiment: 15.84 ms against 1.63 ms with the stage off
-3. **Decimate the field.** Riskier than a robot and worth doing second: check first whether any
-   MeshCollider in LiteScene shares a render mesh, because that is physics, not decoration.
-   `ReduceRobotMeshes` refuses to touch those and reports them
+3. **Decimate the field — DONE 2026-11-02** (`Tools ▸ RoboSim ▸ Field & Pieces ▸ Reduce Field Meshes`)
+   - SampleScene 6.20M → **4.11M** drawn triangles (−34 %), LiteScene 2.70M → **1.27M** (−53 %).
+     168 reduced meshes in `Assets/FieldMeshes`, 104 MB of LFS
+   - Physics untouched: colliders keep their own FBX mesh, and each reduced mesh carries its source's
+     bounds, which is what PieceGeometry / ClawGrab read
+   - The decimator now **carries the import's normals** (`keepSourceNormals`). Rebuilt by angle,
+     even an unreduced corner piece shaded 12 % different from its import, so 3.35M triangles could
+     never pass the look check. Carried, the unreduced rebuild matches the import exactly
+   - The field is held to a **stricter look** than a robot, because a player drives right up to it:
+     each part judged at the closest chase-camera density (~200 px per world unit), pixel tolerance
+     24, limit 0.5 %, one more gentle step at 0.7. Meshes under 2,000 triangles are left alone: a
+     goal's engraved rings are separate small meshes, the check forgives anything under 3 px wide,
+     and they came out a circle instead of a hexagon. All meshes under 2,000 together were 43k
+   - Checked by rendering both scenes before and after: overview, corners and goals, at 4 units
+     (the closest the camera gets) and closer. At 4 units 0.2–0.4 % of pixels move by more than
+     2/255 and nothing is visible; closer than the camera can get, a goal's top rim softens slightly
 4. **Then decide about merging.** After decimation the draws are the only thing left, and merging
    costs a duplicated copy of the mesh data — cheap once the meshes are small, and possibly not worth
    it at all. Measure before spending it
@@ -72,13 +85,16 @@ parts each, built from two material *assets*, which reads like a draw-call probl
 
 ### Free while you are in there
 
-- `LiteScene`'s camera has `m_RenderPostProcessing: 1` (`LiteScene.unity:2899`) and the scene's
-  Volume points at `DefaultVolumeProfile` — where **every effect is neutral**: Tonemapping `None`,
-  Bloom intensity 0, DoF `Off`, every other intensity 0
-  - So the app pays for a post chain that does nothing: an intermediate colour buffer instead of
-    rendering straight to the backbuffer (expensive on a tile GPU), and a full-screen blit
-  - `m_SupportsHDR: 1` makes that intermediate FP16, doubling its bandwidth, for effects that are off
-  - Turn both off and check a screenshot is identical. It should be
+- **Post-processing — CORRECTED 2026-11-02, the first read was wrong.** The field scenes' Volume
+  points at `SampleSceneProfile`, not `DefaultVolumeProfile`, and it is NOT neutral: Neutral
+  tonemapping, Bloom 0.25 (threshold 1), Vignette 0.2
+  - Turning post and HDR off was tried and rendered: the field comes out ~7 % brighter with the
+    walls and tape blown to white. Not the same picture, so post and HDR stay on
+  - **Bloom is off** (`SampleSceneProfile.asset`). Rendered A/B: 0.24 % of pixels move by more than
+    2/255, all of it a faint glow along the bright tape lines. Bloom is the multi-pass part of the
+    chain (prefilter plus a down/up-sample pyramid), so it is the one worth paying nothing for
+  - Tonemapping and vignette stay: both run inside the one uber pass the chain needs anyway, and
+    tonemapping needs the HDR buffer. Render scale 0.8 means there is an intermediate buffer either way
 - All 752 LiteScene renderers have `m_ReceiveShadows: 1`, including ones nothing can shadow
 
 ## 1. The field drops to 30 fps after four minutes of driving
@@ -124,33 +140,33 @@ holds it there for the rest of the session — it never recovers while you keep 
   - `Off` — 35% held flat across 20 minutes
   - So the turntable is most of the idle drain on the home screen, which is where the app sits
 
-## 3. The performance readout sits on top of L1 and L2
+## 3. The performance readout sits on top of L1 and L2 — FIXED 2026-11-02
 
 Connor, on the phone, 2026-09-17.
 
-- `PerfOverlay.cs:45-46` places it by hand: `HomePosition (40, -40)`, `FieldPosition (40, -228)`
-  - The 228 was meant to clear L1/L2 in a game. It does not — and it cannot, because button
-    positions are **player-configurable** (Controls Layout: "drag every button where your thumbs
-    actually are"). No fixed offset is safe for everyone
-- Options, cheapest first:
-  - move it to a corner the controls never occupy, and check that against `ControlsLayout`'s bounds
-  - read the live L1/L2 `RectTransform`s and sit clear of them
-  - make the panel draggable, like the controls themselves
-- Diagnostics-only, so it never reached a player — it is in the way of *testing*, which is why it
-  matters now that the perf runs are a routine
+- **Fixed:** in a game the panel now reads where the controls really are, once a second, and takes the
+  first spot none of them touch (`PerfOverlay.ClearSpot`): under L1/L2, the top-left corner, top
+  middle, top-right, under R1/R2, then the side middles. Every button in the scene counts, plus the
+  six movable groups by name (that covers the joysticks). Nowhere clear: the least-covered spot
+  - `Validate Performance Overlay` checks the default layout still gives the old spot, that L1/L2
+    dragged over it moves the panel, and that a fully covered screen does not just take the first spot
+- What it was, for the record:
+  - `PerfOverlay.cs:45-46` placed it by hand: `HomePosition (40, -40)`, `FieldPosition (40, -228)`.
+    The 228 was meant to clear L1/L2, and could not for everyone: button positions are
+    **player-configurable** (Controls Layout: "drag every button where your thumbs actually are")
+  - Of the three options listed then (a fixed safe corner, read the live controls, a draggable
+    panel), reading the live controls is the one that works for every layout
 
-## 4. Pneumatic stroke classes are wrong
+## 4. Pneumatic stroke classes are wrong — FIXED 2026-11-02
 
-- The real classes are **25 / 50 / 75 mm** (Connor, 2026-09-17). The code asserts 20 / 50 / 90
-  - `Assets/Scripts/Editor/Mechanisms/PneumaticBuilder.cs` — `CylinderSize` enum
-    (`Large90`/`Regular50`/`Small20`), the switch, `SizeFromStroke`, and the defaults
-  - `Assets/Scripts/Mechanisms/ClawRig.cs:192` tooltip and `:193` default
-  - `Assets/Scripts/Editor/Mechanisms/ClawBuilder.cs:79` default
-- Every shipped pneumatic is therefore off-class: v1 ×2 at 90, v2 flip + clamp at 20
+- **Fixed:** the four sources say 25 / 50 / 75, and the four baked values moved to the nearest real
+  class: v1's two 90s are 75, v2's flip and clamp 20s are 25 (edited in the prefabs, which is what a
+  builder re-run writes for these fields). Nothing to re-bundle
+- What it was: the code asserted 20 / 50 / 90 in `PneumaticBuilder.cs` (`CylinderSize` enum, now
+  `Large75`/`Regular50`/`Small25`, its switch, `SizeFromStroke`, defaults), `ClawRig.cs:192-193` and
+  `ClawBuilder.cs` (presets, defaults, the stroke error message)
 - **Cosmetic only.** `strokeMm` drives the visible rod slide through `PneumaticCylinderFollower`;
   the real motion comes from `retractedDeg` / `extendedDeg`
-- Fix the four sources, then re-run the builders on v1 and v2 to re-bake the four values
-  - Both robots are `remote: 0`, so **no re-bundle and no re-upload**
 
 ## 5. Scene reload hitches 186–283 ms
 

@@ -43,8 +43,8 @@ public class ClawBuilderWindow : EditorWindow
     private const string Title = "Build Claw";
 
     private static readonly string[] CylinderSizeLabels =
-        { "Large (90 mm)", "Regular (50 mm)", "Small (20 mm)", "Custom" };
-    private static readonly float[] CylinderSizeStrokes = { 90f, 50f, 20f };
+        { "Large (75 mm)", "Regular (50 mm)", "Small (25 mm)", "Custom" };
+    private static readonly float[] CylinderSizeStrokes = { 75f, 50f, 25f };
 
     [SerializeField] private string displayName = "Claw";
 
@@ -76,7 +76,7 @@ public class ClawBuilderWindow : EditorWindow
     [SerializeField] private float flipDamping = 500f;
     [SerializeField] private GameObject flipCylinderBody;
     [SerializeField] private GameObject flipCylinderRod;
-    [SerializeField] private float flipStrokeMm = 90f;
+    [SerializeField] private float flipStrokeMm = 75f;
     [SerializeField] private float flipRecoil = 0.5f;
     [SerializeField] private bool flipCylinderReverse;
 
@@ -1018,7 +1018,7 @@ public class ClawBuilderWindow : EditorWindow
         flipTravelSeconds = 0.35f;
         flipStartExtended = false; flipStiffness = 20000f; flipDamping = 500f;
         flipCylinderBody = null; flipCylinderRod = null;
-        flipStrokeMm = 90f; flipRecoil = 0.5f; flipCylinderReverse = false;
+        flipStrokeMm = 75f; flipRecoil = 0.5f; flipCylinderReverse = false;
         clampSections = new List<ClawRig.ClampSection>();
         clampModelled = ClawRig.JawRest.ModelledOpen; clampStartClosed = false; clampTrimDeg = 0f;
         clampStiffness = 20000f; clampDamping = 500f;
@@ -2597,7 +2597,7 @@ public static class ClawSetup
                 "and the extending part as the rod.");
         if (strokeMm <= 0f)
             throw new InvalidOperationException(
-                $"The {role} cylinder's stroke must be positive (a real VEX cylinder is 20-90 mm).");
+                $"The {role} cylinder's stroke must be positive (a real VEX cylinder is 25-75 mm).");
         if (body.GetComponentInChildren<Renderer>(true) == null ||
             rod.GetComponentInChildren<Renderer>(true) == null)
             throw new InvalidOperationException($"The {role} cylinder's parts need meshes to move.");

@@ -32,18 +32,18 @@ public class PneumaticBuilderWindow : EditorWindow
     };
 
     // The three real VEX cylinder bore/stroke classes, plus a free-form escape hatch.
-    private enum CylinderSize { Large90, Regular50, Small20, Custom }
+    private enum CylinderSize { Large75, Regular50, Small25, Custom }
     private static readonly string[] CylinderSizeLabels =
     {
-        "Large (90 mm)", "Regular (50 mm)", "Small (20 mm)", "Custom (mm)",
+        "Large (75 mm)", "Regular (50 mm)", "Small (25 mm)", "Custom (mm)",
     };
 
     [SerializeField] private PneumaticRig.RigMode mode = PneumaticRig.RigMode.Linear;
     [SerializeField] private GameObject movingPart;   // Linear: the rod. Rotary: the rotating part.
     [SerializeField] private GameObject barrel;       // Linear only
     [SerializeField] private List<GameObject> alsoMove = new List<GameObject>();
-    [SerializeField] private CylinderSize cylinderSize = CylinderSize.Large90;
-    [SerializeField] private float strokeMm = 90f;
+    [SerializeField] private CylinderSize cylinderSize = CylinderSize.Large75;
+    [SerializeField] private float strokeMm = 75f;
     [SerializeField] private float retractedDeg = 0f;
     [SerializeField] private float extendedDeg = 90f;
     [SerializeField] private PneumaticRig.RigAxis axisPreset = PneumaticRig.RigAxis.Auto;
@@ -124,7 +124,7 @@ public class PneumaticBuilderWindow : EditorWindow
         {
             DrawCylinderSize("Cylinder size (stroke)",
                 "How far the rod slides out. Pick the real cylinder class on this model — VEX cylinders come " +
-                "in Large (90 mm), Regular (50 mm) and Small (20 mm); Custom for anything else.");
+                "in Large (75 mm), Regular (50 mm) and Small (25 mm); Custom for anything else.");
         }
         else
         {
@@ -164,7 +164,7 @@ public class PneumaticBuilderWindow : EditorWindow
             {
                 DrawCylinderSize("Cylinder size (rod travel)",
                     "How far the rod slides out at full swing. Pick the real cylinder class on this model — " +
-                    "VEX cylinders are Large (90 mm), Regular (50 mm) or Small (20 mm); Custom for anything else. " +
+                    "VEX cylinders are Large (75 mm), Regular (50 mm) or Small (25 mm); Custom for anything else. " +
                     "The rod extends 0 → this over the retracted→extended swing.");
                 flipRod = EditorGUILayout.Toggle(new GUIContent("Flip rod direction",
                     "If the rod slides IN when the metal fires (extended looks retracted) and OUT when it rests, " +
@@ -285,7 +285,7 @@ public class PneumaticBuilderWindow : EditorWindow
         movingPart = null; barrel = null; pivotMarker = null;
         pneumaticBody = null; cylinderRod = null; pneumaticPivot = null; flipRod = false;
         alsoMove.Clear();
-        strokeMm = 90f; cylinderSize = CylinderSize.Large90; retractedDeg = 0f; extendedDeg = 90f;
+        strokeMm = 75f; cylinderSize = CylinderSize.Large75; retractedDeg = 0f; extendedDeg = 90f;
         axisPreset = PneumaticRig.RigAxis.Auto; customAxis = Vector3.right; anchor = Vector3.zero;
         reverse = false; startExtended = false; autoAssignButton = true;
         displayName = "Pneumatic";
@@ -299,9 +299,9 @@ public class PneumaticBuilderWindow : EditorWindow
         cylinderSize = (CylinderSize)EditorGUILayout.Popup(new GUIContent(label, tip), (int)cylinderSize, CylinderSizeLabels);
         switch (cylinderSize)
         {
-            case CylinderSize.Large90:   strokeMm = 90f; break;
+            case CylinderSize.Large75:   strokeMm = 75f; break;
             case CylinderSize.Regular50: strokeMm = 50f; break;
-            case CylinderSize.Small20:   strokeMm = 20f; break;
+            case CylinderSize.Small25:   strokeMm = 25f; break;
             case CylinderSize.Custom:
                 strokeMm = EditorGUILayout.FloatField(new GUIContent("Custom stroke (mm)",
                     "How far the rod extends, in millimeters."), strokeMm);
@@ -314,9 +314,9 @@ public class PneumaticBuilderWindow : EditorWindow
     }
 
     private static CylinderSize SizeFromStroke(float mm)
-        => Mathf.Approximately(mm, 90f) ? CylinderSize.Large90
+        => Mathf.Approximately(mm, 75f) ? CylinderSize.Large75
          : Mathf.Approximately(mm, 50f) ? CylinderSize.Regular50
-         : Mathf.Approximately(mm, 20f) ? CylinderSize.Small20
+         : Mathf.Approximately(mm, 25f) ? CylinderSize.Small25
          : CylinderSize.Custom;
 
     // Fill empty rod/barrel slots from name tokens under the robot — a best guess to verify.

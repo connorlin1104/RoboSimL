@@ -66,6 +66,15 @@ public static class MeshDecimator
         // Recompute tangents. Only meaningful with UVs and a normal map; 16 bytes per vertex
         // otherwise, which on these robots is the single largest piece of dead weight in the file.
         public bool recalculateTangents;
+
+        // Carry the import's own normals through instead of rebuilding them by smoothing angle. Each
+        // triangle corner keeps the normal it had in the source, and the output splits a vertex only
+        // where those differ, so with nothing removed the result shades exactly like the import.
+        // Measured on the field: with this off, an UNREDUCED rebuild of a corner piece already scored
+        // 0.12 against the import (a Toggle frame 0.30), so the look check failed them at every ratio
+        // and 3.35M of the field's triangles stayed full detail. smoothingAngle is then only a
+        // fallback for a source with no normals.
+        public bool keepSourceNormals;
     }
 
     // What happened, for the tool to show and for validation to assert on.
@@ -135,6 +144,8 @@ public static class MeshDecimator
         public int v0, v1, v2;
         public int submesh;
         public Vector3 normal;
+        // The source normal at each corner (keepSourceNormals only), indexed by slot like v0..v2.
+        public Vector3 n0, n1, n2;
         public double err0, err1, err2, errMin;
         public bool deleted;
         public bool dirty;
@@ -157,6 +168,8 @@ public static class MeshDecimator
 
     private static Face[] faces;
     private static Vert[] verts;
+    private static bool sourceNormals; // this run carries corner normals (see Options.keepSourceNormals)
+    private static float snapCos;      // how alike two corner normals must be for one to stand in for the other
 
     // The corner index: every vertex's incident faces, as one flat array with a start/count per
     // vertex. A List<int> per vertex would be two million small allocations.
@@ -172,6 +185,8 @@ public static class MeshDecimator
     private static readonly List<bool> deletedA = new List<bool>();
     private static readonly List<bool> deletedB = new List<bool>();
     private static readonly List<Corner> survivors = new List<Corner>();
+    private static readonly List<Vector3> normalsAt0 = new List<Vector3>();
+    private static readonly List<Vector3> normalsAt1 = new List<Vector3>();
 
     // ---------------------------------------------------------------------------------------------
 
@@ -209,6 +224,7 @@ public static class MeshDecimator
         int target = Mathf.Max(options.floorTriangles,
             Mathf.RoundToInt(result.sourceTriangles * Mathf.Clamp01(options.targetRatio)));
 
+        snapCos = Mathf.Cos(Mathf.Clamp(options.smoothingAngle, 0f, 180f) * Mathf.Deg2Rad);
         result.hitErrorCeiling = Collapse(target, errorCeiling);
 
         Mesh simplified = Compact(source, options);
@@ -237,6 +253,8 @@ public static class MeshDecimator
     private static void Build(Mesh source, Options options)
     {
         Vector3[] positions = source.vertices;
+        Vector3[] sourceN = options.keepSourceNormals ? source.normals : null;
+        sourceNormals = sourceN != null && sourceN.Length == positions.Length;
         Vector2[] uvs = options.keepUv ? source.uv : null;
         if (uvs != null && uvs.Length != positions.Length) uvs = null;
 
@@ -274,7 +292,14 @@ public static class MeshDecimator
                 // Carrying it forward would give it a zero-length normal and poison every quadric it
                 // touches with NaN.
                 if (a == b || b == c || a == c) continue;
-                faceList.Add(new Face { v0 = a, v1 = b, v2 = c, submesh = sub });
+                var face = new Face { v0 = a, v1 = b, v2 = c, submesh = sub };
+                if (sourceNormals)
+                {
+                    face.n0 = sourceN[indices[i]];
+                    face.n1 = sourceN[indices[i + 1]];
+                    face.n2 = sourceN[indices[i + 2]];
+                }
+                faceList.Add(face);
             }
         }
         faces = faceList.ToArray();
@@ -520,6 +545,15 @@ public static class MeshDecimator
                     // so the check costs a count.
                     if (live - Doomed(deletedA, deletedB) < target) continue;
 
+                    // Which end stayed put, if either: decides whose normals the moved corners take.
+                    bool keptP0 = merged == verts[v0].position && merged != verts[v1].position;
+                    bool keptP1 = !keptP0 && merged == verts[v1].position;
+                    if (sourceNormals)
+                    {
+                        CollectNormals(v0, normalsAt0);
+                        CollectNormals(v1, normalsAt1);
+                    }
+
                     verts[v0].position = merged;
                     verts[v0].quadric += verts[v1].quadric;
                     verts[v0].border |= verts[v1].border;
@@ -528,7 +562,16 @@ public static class MeshDecimator
                     // faces, plus v1's faces now pointing at it.
                     survivors.Clear();
                     live -= Retarget(v0, v0, deletedA, survivors);
+                    int fromV0 = survivors.Count;
                     live -= Retarget(v0, v1, deletedB, survivors);
+                    if (sourceNormals)
+                    {
+                        // Ends kept: the moved corners take the normal already at the spot. Midpoint:
+                        // both ends moved half way, so every corner takes half of the other end's.
+                        bool mid = !keptP0 && !keptP1;
+                        if (!keptP1) SnapNormals(fromV0, survivors.Count, normalsAt0, mid);
+                        if (!keptP0) SnapNormals(0, fromV0, normalsAt1, mid);
+                    }
                     ReplaceRun(v0, survivors);
                     verts[v1].cornerCount = 0;
                     break;
@@ -540,6 +583,59 @@ public static class MeshDecimator
             if (live == before && atCeiling) return true;
         }
         return true;
+    }
+
+    // keepSourceNormals: a collapse that keeps one end where it was moves the OTHER end's faces onto
+    // that spot, and their corners still carry the normal of the point they left. On a curved surface
+    // that is the wrong normal for where they now sit; the right one is what the surface already has
+    // at the spot, which is a normal of the end that stayed. Each moved corner takes the closest of
+    // those, if one is within the smoothing angle; across a sharp edge nothing is that close, and the
+    // corner keeps its own, which is the hard edge staying hard. A midpoint collapse moves both ends
+    // half way, so each corner goes half way to the other end's normal instead. Without these, the
+    // error compounds collapse after collapse: a reduced ball measured 13-19 degrees off its import.
+    //
+    // Reads both ends' normals BEFORE the collapse, because the faces it deletes (the two that share
+    // the edge) are the ones whose normals match best.
+    private static void CollectNormals(int vertex, List<Vector3> into)
+    {
+        into.Clear();
+        for (int i = 0; i < verts[vertex].cornerCount; i++)
+        {
+            Corner corner = corners[verts[vertex].cornerStart + i];
+            if (faces[corner.face].deleted || VertexAt(corner) != vertex) continue;
+            into.Add(CornerNormal(corner));
+        }
+    }
+
+    private static void SnapNormals(int from, int to, List<Vector3> anchor, bool halfway)
+    {
+        if (anchor.Count == 0) return;
+        for (int i = from; i < to; i++)
+        {
+            Corner corner = survivors[i];
+            Vector3 own = CornerNormal(corner);
+            float best = snapCos;
+            Vector3 pick = own;
+            foreach (Vector3 candidate in anchor)
+            {
+                float dot = Vector3.Dot(candidate, own);
+                if (dot >= best) { best = dot; pick = candidate; }
+            }
+            SetCornerNormal(corner, halfway ? (own + pick).normalized : pick);
+        }
+    }
+
+    private static Vector3 CornerNormal(Corner corner)
+    {
+        Face face = faces[corner.face];
+        return corner.slot == 0 ? face.n0 : corner.slot == 1 ? face.n1 : face.n2;
+    }
+
+    private static void SetCornerNormal(Corner corner, Vector3 n)
+    {
+        if (corner.slot == 0) faces[corner.face].n0 = n;
+        else if (corner.slot == 1) faces[corner.face].n1 = n;
+        else faces[corner.face].n2 = n;
     }
 
     // How many faces a pending collapse would remove. Both lists describe the same shared faces from
@@ -680,12 +776,15 @@ public static class MeshDecimator
             for (int i = 0; i < verts[v].cornerCount; i++)
             {
                 Corner corner = corners[verts[v].cornerStart + i];
-                Vector3 n = FaceNormal(corner.face);
+                // Carried normals group by being the same normal (a hair of float noise allowed), so a
+                // vertex splits exactly where the import split it; rebuilt ones by smoothing angle.
+                Vector3 n = sourceNormals ? CornerNormal(corner) : FaceNormal(corner.face);
+                float limit = sourceNormals ? SameNormalCos : cosLimit;
 
                 int cluster = -1;
                 for (int c = 0; c < clusterNormals.Count; c++)
                 {
-                    if (Vector3.Dot(clusterNormals[c].normalized, n) >= cosLimit) { cluster = c; break; }
+                    if (Vector3.Dot(clusterNormals[c].normalized, n) >= limit) { cluster = c; break; }
                 }
                 if (cluster < 0)
                 {
@@ -698,8 +797,9 @@ public static class MeshDecimator
                 }
 
                 // Unnormalized face normals accumulate area weighting for free — a big face should
-                // pull the shared normal further than the sliver beside it.
-                clusterNormals[cluster] += n * FaceArea(corner.face);
+                // pull the shared normal further than the sliver beside it. Carried normals are
+                // already the answer; summing them only averages away float noise.
+                clusterNormals[cluster] += sourceNormals ? n : n * FaceArea(corner.face);
                 normals[clusterOutput[cluster]] = clusterNormals[cluster];
                 faceCorner[corner.face * 3 + corner.slot] = clusterOutput[cluster];
             }
@@ -737,6 +837,8 @@ public static class MeshDecimator
         mesh.RecalculateBounds();
         return mesh;
     }
+
+    private const float SameNormalCos = 0.99999f;
 
     private static Vector3 FaceNormal(int f)
     {

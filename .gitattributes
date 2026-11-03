@@ -9,3 +9,5 @@ Assets/RobotMeshes/**/*.asset filter=lfs diff=lfs merge=lfs -text
 # The home stage's merged showcase meshes, the same kind of generated mesh (BuildShowcasePrefabs):
 # 654V v3's is 77 MB of hex, past GitHub's 50 MB warning, and re-written on every re-bake.
 Assets/UI/Showcase/*_ShowcaseMeshes.asset filter=lfs diff=lfs merge=lfs -text
+# The field's reduced render meshes (ReduceFieldMeshes), the same kind of generated mesh:
+Assets/FieldMeshes/*.asset filter=lfs diff=lfs merge=lfs -text
