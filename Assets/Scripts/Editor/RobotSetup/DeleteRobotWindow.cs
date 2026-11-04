@@ -51,10 +51,14 @@ public class DeleteRobotWindow : EditorWindow
         public readonly List<string> assetFiles = new List<string>();   // under Assets/, so AssetDatabase deletes them
         public readonly List<string> looseFiles = new List<string>();   // outside Assets/, so File.Delete
         public readonly List<string> prefKeys = new List<string>();
+        // The staged index for this robot's address, when it lists this robot. Shared with every other
+        // robot under the same owner code, so it is rewritten without this one, not deleted.
+        public string stagedIndex = string.Empty;
         public long bytes;
 
         public bool IsEmpty => string.IsNullOrEmpty(prefabPath) && !hasCatalogEntry &&
-                               assetFiles.Count == 0 && looseFiles.Count == 0 && prefKeys.Count == 0;
+                               assetFiles.Count == 0 && looseFiles.Count == 0 && prefKeys.Count == 0 &&
+                               string.IsNullOrEmpty(stagedIndex);
     }
 
     // Every id worth offering: catalog entries, plus prefabs in Assets/Robots that no entry claims.
@@ -124,12 +128,39 @@ public class DeleteRobotWindow : EditorWindow
 
         if (!string.IsNullOrEmpty(plan.prefabPath)) plan.bytes += SizeOf(plan.prefabPath);
 
+        // What the setup tools write beside the prefab. Each one used to survive a delete:
+        // - the home stage's showcase and its merged meshes, 77-104 MB of Git LFS per robot
+        // - the reduced render meshes and the collision hulls, a folder each, named after the prefab
+        string showcase = entry != null && entry.showcasePrefab != null
+            ? AssetDatabase.GetAssetPath(entry.showcasePrefab)
+            : BuildShowcasePrefabs.ShowcasePath(id);
+        AddAsset(showcase, plan);
+        AddAsset(BuildShowcasePrefabs.MeshesPath(id), plan);
+        if (!string.IsNullOrEmpty(plan.prefabPath))
+        {
+            string robotName = Path.GetFileNameWithoutExtension(plan.prefabPath);
+            AddAsset(ReduceRobotMeshes.MeshFolder + "/" + ReduceRobotMeshes.Sanitize(robotName), plan);
+            AddAsset(GeneratePartColliders.HullAssetRootFolder + "/" + robotName, plan);
+        }
+
         foreach (string bundleId in bundleIds)
         {
-            string pattern = RobotBundleFormat.Sanitize(bundleId) + "-*" + RobotBundleFormat.Extension;
+            string safeId = RobotBundleFormat.Sanitize(bundleId);
+            string pattern = safeId + "-*" + RobotBundleFormat.Extension;
             Collect(Path.Combine(BuildRobotBundles.StreamingRoot, RobotBundleFormat.StreamingFolder),
                     pattern, plan, plan.assetFiles);
             Collect(BuildRobotBundles.StagingFolder, pattern, plan, plan.looseFiles);
+            // The build's own scratch copy, named without the version: <id>.bundle and its .manifest.
+            Collect(Path.Combine(BuildRobotBundles.StagingFolder, ".build"), safeId + RobotBundleFormat.Extension + "*",
+                    plan, plan.looseFiles);
+        }
+
+        if (entry != null)
+        {
+            string index = Path.Combine(BuildRobotBundles.StagingFolder,
+                RobotBundleAddress.IndexPath(RobotBundleAddress.Folder(entry))).Replace('\\', '/');
+            if (File.Exists(index) && ReadIndex(index).robots.Exists(r => r != null && r.id == id))
+                plan.stagedIndex = index;
         }
 
         foreach (string key in new[] { ControllerMapSettings.PrefKey(id), ControllerMapSettings.SeedPrefKey(id) })
@@ -148,6 +179,30 @@ public class DeleteRobotWindow : EditorWindow
             into.Add(normalized);
             plan.bytes += SizeOf(normalized);
         }
+    }
+
+    // An asset file or folder, if it is there.
+    private static void AddAsset(string path, Plan plan)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        path = path.Replace('\\', '/');
+        if (plan.assetFiles.Contains(path)) return;
+        if (Directory.Exists(path))
+        {
+            plan.assetFiles.Add(path);
+            foreach (string file in Directory.GetFiles(path, "*", SearchOption.AllDirectories)) plan.bytes += SizeOf(file);
+        }
+        else if (File.Exists(path))
+        {
+            plan.assetFiles.Add(path);
+            plan.bytes += SizeOf(path);
+        }
+    }
+
+    private static RobotCatalogIndex ReadIndex(string path)
+    {
+        try { return JsonUtility.FromJson<RobotCatalogIndex>(File.ReadAllText(path)) ?? new RobotCatalogIndex(); }
+        catch (System.Exception) { return new RobotCatalogIndex(); }
     }
 
     private static long SizeOf(string path)
@@ -199,6 +254,22 @@ public class DeleteRobotWindow : EditorWindow
             report.AppendLine($"  {plan.prefKeys.Count} PlayerPrefs button-map key(s)");
         }
 
+        if (!string.IsNullOrEmpty(plan.stagedIndex))
+        {
+            RobotCatalogIndex index = ReadIndex(plan.stagedIndex);
+            index.robots.RemoveAll(r => r == null || r.id == plan.id);
+            if (index.robots.Count == 0)
+            {
+                File.Delete(plan.stagedIndex);
+                report.AppendLine("  " + plan.stagedIndex + " (it listed only this robot)");
+            }
+            else
+            {
+                File.WriteAllText(plan.stagedIndex, JsonUtility.ToJson(index, true));
+                report.AppendLine($"  removed from {plan.stagedIndex} ({index.robots.Count} other robot(s) kept)");
+            }
+        }
+
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
 
@@ -238,6 +309,8 @@ public class DeleteRobotWindow : EditorWindow
             foreach (string path in plan.assetFiles) EditorGUILayout.LabelField("• " + path);
             foreach (string path in plan.looseFiles) EditorGUILayout.LabelField("• " + path);
             foreach (string key in plan.prefKeys) EditorGUILayout.LabelField("• PlayerPrefs " + key);
+            if (!string.IsNullOrEmpty(plan.stagedIndex))
+                EditorGUILayout.LabelField("• its line in " + plan.stagedIndex);
         }
         EditorGUILayout.EndScrollView();
 
@@ -272,6 +345,7 @@ public class DeleteRobotWindow : EditorWindow
         if (plan.hasCatalogEntry) parts.Add("1 catalog entry");
         if (files > 0) parts.Add($"{files} file(s), {Megabytes(plan.bytes)}");
         if (plan.prefKeys.Count > 0) parts.Add($"{plan.prefKeys.Count} saved button layout(s)");
+        if (!string.IsNullOrEmpty(plan.stagedIndex)) parts.Add("its line in the staged index");
         return string.Join("\n", parts.ToArray());
     }
 
