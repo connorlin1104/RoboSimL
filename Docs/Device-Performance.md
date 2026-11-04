@@ -155,8 +155,9 @@ LiteScene, 8.6 minutes, from a cold phone.
   fps is not reachable in LiteScene on this phone at all, and 46-49 was the ceiling
 - `cpu_main` 6.0 -> 10.8 is the throttle slowing the CPU, not new work
 - Memory 807 -> 890 MB, headroom never under 1208 MB
-- Field load: **2.467 s** the first time, 0.17 / 0.21 / 0.30 s on warm reloads. Two of those three
-  reloads hitched, 186 ms and 283 ms
+- Field load: **2.467 s** the first time, 0.17 / 0.21 / 0.30 s on warm reloads. Each reload's worst
+  frame (186 / 150 / 283 ms) is the load itself: `LoadScene` does it all in one frame. Not a hitch in
+  play (Version-1.2.md §5)
 
 ### Cold launches — nothing wrong
 

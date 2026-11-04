@@ -174,11 +174,22 @@ Connor, on the phone, 2026-09-17.
 - **Cosmetic only.** `strokeMm` drives the visible rod slide through `PneumaticCylinderFollower`;
   the real motion comes from `retractedDeg` / `extendedDeg`
 
-## 5. Scene reload hitches 186–283 ms
+## 5. Scene reload "hitches" 186–283 ms — NOT A HITCH, closed 2026-11-03
 
-- Run 4 reloaded LiteScene three times. Two of them hitched: 186 ms at t=307, 283 ms at t=493
-- Warm reloads are otherwise fast — `load_s` 0.17 / 0.21 / 0.30 against 2.47 s for the first load
-- Low priority: it is a hitch on a screen the player just asked to change
+- **The slow frame is the reload itself.** `SceneNavButton.Load` uses `SceneManager.LoadScene`, which
+  does the whole load inside one frame, so that frame lasts as long as the load. Run 4's raw log:
+
+  | reload | `load_s` | worst frame that second |
+  | --- | --- | --- |
+  | t=307 | 0.207 | 186 ms |
+  | t=332 | 0.169 | 150 ms |
+  | t=492 | 0.299 | 283 ms |
+  | back to home, t=543 | 0.141 | 133 ms |
+
+- All of them do it (the first write-up said two of three), and the very next second is a flat 30.0
+  fps every time. Nothing stalls once the field is up
+- Loading async would not make the wait shorter: the player still waits 0.17–0.30 s for the field to
+  reset, and the screen is about to change anyway. Leave it
 
 ---
 
