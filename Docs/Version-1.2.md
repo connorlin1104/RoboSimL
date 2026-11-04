@@ -95,7 +95,13 @@ parts each, built from two material *assets*, which reads like a draw-call probl
     chain (prefilter plus a down/up-sample pyramid), so it is the one worth paying nothing for
   - Tonemapping and vignette stay: both run inside the one uber pass the chain needs anyway, and
     tonemapping needs the HDR buffer. Render scale 0.8 means there is an intermediate buffer either way
-- All 752 LiteScene renderers have `m_ReceiveShadows: 1`, including ones nothing can shadow
+- ~~All 752 LiteScene renderers have `m_ReceiveShadows: 1`~~ — **checked 2026-11-03, not a lever, leave it**
+  - URP ignores the renderer's Receive Shadows flag. Only the material's `_RECEIVE_SHADOWS_OFF` keyword
+    turns shadow sampling off (`Shadows.hlsl:13`), so flipping 752 renderer flags saves nothing
+  - Receiving is already cheap: hard shadows, one cascade, a 1024 map (`Mobile_RPAsset.asset:45-66`),
+    so it is one shadow-map read per pixel
+  - Turning it off per material would mean splitting the field's shared materials, which adds draws.
+    That costs more than one read saves
 
 ## 1. The field drops to 30 fps after four minutes of driving
 
