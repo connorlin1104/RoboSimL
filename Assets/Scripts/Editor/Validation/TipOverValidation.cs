@@ -219,6 +219,21 @@ public static class TipOverValidation
     // this fires while the balance check passes, the asymmetry is in the code, not the robot.
     private const float MinTipAngleSymmetry = 0.9f;
     private const float MaxTurnRollAsymmetryDeg = 3f;
+
+    // ROBOTS WHOSE OFFSET IS THEIR LAYOUT, accepted 2026-11-03. Both sit off centre with the lift DOWN
+    // (chassis layout, not a lift and not an anchor), were red on the symmetry ratio above since July,
+    // and were DRIVEN by Connor and judged fine (v2 and v3 five minutes each, 2026-09-07). The turn
+    // measured beside the ratio agrees with him: peak roll 0.3 right / 0.3 left on v2, 0.4 on v3,
+    // against the 3-degree bar. So the ratio was a prediction the robot does not bear out.
+    // What the check is FOR still holds — a stale joint anchor throws a link sideways the instant
+    // physics starts — so these two are pinned to the offset they measure, in mm, and a move of more
+    // than AcceptedOffsetToleranceMm off it fails. Any robot not listed keeps the ratio rule.
+    private static readonly Dictionary<string, float> AcceptedLateralOffsetMm = new Dictionary<string, float>
+    {
+        { "654V_v2", -9.5f },
+        { "654V_v3", 23.8f },
+    };
+    private const float AcceptedOffsetToleranceMm = 3f;
     // The slowest of the four robots enters this turn at 9.26 u/s and the fastest at 16.57, so 5 is
     // "it plainly got up to speed" without being fitted to any one robot's top end.
     private const float MinTurnEntrySpeed = 5f;
@@ -487,6 +502,18 @@ public static class TipOverValidation
         float frictionLimit = 0.5f * (right.frictionTipLimitDeg + left.frictionTipLimitDeg);
         bool tippable = weaker < frictionLimit;
 
+        if (AcceptedLateralOffsetMm.TryGetValue(prefab.name, out float acceptedMm))
+        {
+            float offsetMm = offset * 100f;
+            ValidationUtil.Assert(Mathf.Abs(offsetMm - acceptedMm) <= AcceptedOffsetToleranceMm,
+                $"'{prefab.name}' moved off its accepted layout: its centre of mass sits {offsetMm:0.0} mm across " +
+                $"the wheel track against the {acceptedMm:0.0} mm it was accepted at (tolerance " +
+                $"{AcceptedOffsetToleranceMm:0} mm). Something shifted mass sideways: run Joint Anchors Match The " +
+                "Parts first (a stale anchor teleports a link off the centreline when physics starts), then look " +
+                "at what changed in the prefab. If the robot was rebuilt on purpose, drive it and re-accept " +
+                "the new number in AcceptedLateralOffsetMm.");
+        }
+        else
         ValidationUtil.Assert(!tippable || stronger <= 1e-3f || weaker / stronger >= MinTipAngleSymmetry,
             $"'{prefab.name}' is not balanced across its wheels: with the lift raised its centre of " +
             $"mass sits {offset * 100f:0.0} mm to the {(offset >= 0f ? "right" : "left")} of the middle " +

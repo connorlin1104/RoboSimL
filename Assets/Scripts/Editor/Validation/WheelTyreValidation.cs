@@ -328,17 +328,36 @@ public static class WheelTyreValidation
 
     // Tick the box: the middle pair keeps its full sideways grip, so the same push slides the robot
     // less than half as far — and still does not lay it over.
+    //
+    // RE-DERIVED 2026-11-03 onto the steady ramp, for the reason the shove control was (faf1d87). The
+    // box is an IMPACT — on v2 it lands at 3.35 of the robot's weight — so how far it slides the robot
+    // moves with the contact set. The old bar (half the all-omni slide) was set when two of each rail's
+    // three wheels carried the robot; with the droop links all six do, the middle pair carries a third
+    // of the weight, and a third of the robot gripping sideways does not halve a 3-weight impact.
+    // The ramp at the centre of mass is the steady version. It does NOT separate the two at BREAKAWAY —
+    // the omni wheels grip at the full cone until they are sliding, because the tyre keys an omni's
+    // grip on lateral MOTION — so the measure is the slide by the end of the ramp. Measured: v2 0.82,
+    // v3 0.81, 360Rpm 0.80 of the all-omni slide with the pair; exactly 1.00 when the pair does not reach
+    // the tyres. This is a WIRING check, as its message has always said: is the pair there or not.
+    private const float MaxPairSlideShare = 0.9f;
+
     private static int ATractionPairResistsTheShove(StringBuilder lines, float omniSlide)
     {
         GameObject prefab = FindRobot(SpikeRobot);
         float withPair = SustainedPush(prefab, tyreOn: true, out string detail, out float roll, out _,
             RobotMotorController.TractionPair.Middle, fromBehind: false);
-        lines.AppendLine($"  sideways push with a MIDDLE traction pair, '{prefab.name}': slid {withPair:0.00} u " +
-                         $"against {omniSlide:0.00} all-omni, rolled {roll:0.0} deg ({detail})");
-        ValidationUtil.Assert(withPair <= omniSlide * 0.5f,
-            $"'{prefab.name}' slid {withPair:0.00} u with a middle traction pair against {omniSlide:0.00} u " +
-            "all-omni — the pair is not resisting the shove. Check tractionPair reaches Initialise before " +
-            $"the tyres register, and that the resolver picked two wheels. ({detail})");
+        LateralBreakaway(prefab, tyreOn: true, out string omniRamp, out float omniTravel);
+        LateralBreakaway(prefab, tyreOn: true, out string pairRamp, out float pairTravel,
+            RobotMotorController.TractionPair.Middle);
+        float share = omniTravel > 1e-4f ? pairTravel / omniTravel : 1f;
+        lines.AppendLine($"  sideways with a MIDDLE traction pair, '{prefab.name}': the ramp slid it {pairTravel:0.00} u " +
+                         $"against {omniTravel:0.00} all-omni ({share:0.00} of it); the box slid it {withPair:0.00} u " +
+                         $"against {omniSlide:0.00}, rolled {roll:0.0} deg ({detail})");
+        ValidationUtil.Assert(share <= MaxPairSlideShare,
+            $"'{prefab.name}' slid {pairTravel:0.00} u under the ramp with a middle traction pair against " +
+            $"{omniTravel:0.00} u all-omni ({share:0.00}, limit {MaxPairSlideShare:0.0}) — the pair is not resisting " +
+            "the push. Check tractionPair reaches Initialise before the tyres register, and that the resolver " +
+            $"picked two wheels. (pair: {pairRamp}; all-omni: {omniRamp})");
         ValidationUtil.Assert(roll < 5f,
             $"'{prefab.name}' rolled {roll:0.0} deg under a sideways push with a traction pair — nothing " +
             "sideways may lay this robot over, traction wheels or not.");
@@ -361,13 +380,15 @@ public static class WheelTyreValidation
     private static float LateralBreakaway(GameObject prefab, bool tyreOn, out string detail)
         => LateralBreakaway(prefab, tyreOn, out detail, out _);
 
-    private static float LateralBreakaway(GameObject prefab, bool tyreOn, out string detail, out float travel)
+    private static float LateralBreakaway(GameObject prefab, bool tyreOn, out string detail, out float travel,
+        RobotMotorController.TractionPair pair = RobotMotorController.TractionPair.None)
     {
         SimulationMode previous = Physics.simulationMode;
         try
         {
             WheelTyreModel.FrictionEnabled = tyreOn;
             ArticulationBody root = ValidationUtil.SpawnOnBareFloor(prefab, out RobotMotorController motor);
+            motor.tractionPair = pair;
             motor.Initialise();
             Physics.simulationMode = SimulationMode.Script;
             TipOverValidation.StepDriven(motor, 0f, 0f, SettleSteps);
