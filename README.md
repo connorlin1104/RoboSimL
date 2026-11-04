@@ -61,7 +61,7 @@ Already cloned without LFS? `git lfs install && git lfs pull`.
 | `Assets/Scripts/Drivetrain/` | Wheel torque, the turn/drive authority mix, the tyre friction model |
 | `Assets/Scripts/Mechanisms/` | Lifts, intakes, pistons — the actuators a robot is built from |
 | `Assets/Scripts/Robot/` | Robot assembly, the mechanism registry, control routing |
-| `Assets/Scripts/FieldPieces/` | Scoreable pieces, goals, the field's latching rollers |
+| `Assets/Scripts/FieldPieces/` | Scoreable pieces, goals, the field's latching Toggles |
 | `Assets/Scripts/Services/` | Robot upload, catalog sync, bundle delivery — the Firebase side |
 | `Assets/Scripts/UI/` | Home screen, settings, the driving controls |
 | `Assets/Scripts/Editor/` | The build tooling — over half the code. Rig builders, collider generation, mesh decimation, screenshot capture, validation rigs |
