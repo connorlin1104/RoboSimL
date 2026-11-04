@@ -163,11 +163,11 @@ Not affiliated with, endorsed by, or sponsored by VEX Robotics, Innovation First
   unwrapped for exactly this reason; the promotional-text block says the same thing
 - **Terminology is the current game's, and the code disagrees with it** (Connor, 2026-09-17):
   - **Toggles**, not rollers — the code calls them rollers (`RollerSnap`, `RigRollersWindow`)
-  - **goals**, not stakes — "stakes" is two games ago. `GoalStackMagnet.cs` tooltips still say it
-    throughout, but they are Editor-only so no player sees them
-  - Pneumatic classes are **25 / 50 / 75 mm**. `ClawRig.cs:192` and `PneumaticBuilder.cs`'s
-    `CylinderSize` enum both assert 20 / 50 / 90, which is wrong — open to fix for 1.2,
-    with the rest of the 1.2 list in `Version-1.2.md`
+  - **goals**, not stakes — "stakes" is two games ago. `GoalStackMagnet.cs`'s tooltips were fixed
+    2026-11-03 (stakes → goals, rings → pieces). Code comments and class names still say the old
+    words, but they are Editor-only so no player sees them. Checked 2026-11-03: no text a player
+    can see in the app says roller or stake
+  - Pneumatic classes are **25 / 50 / 75 mm** — fixed in the code and prefabs 2026-11-02
 
 ### What's New (4000 max — required for every version after the first)
 

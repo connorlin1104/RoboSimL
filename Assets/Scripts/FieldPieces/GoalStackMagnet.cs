@@ -54,13 +54,13 @@ public class GoalStackMagnet : MonoBehaviour
     public Transform stackAnchor;
 
     [Header("Capture (small on purpose — a clear miss must stay out)")]
-    [Tooltip("How far off the stack axis (world units, horizontal) a piece's center may be and still get captured NEAR THE POST TOP — the wide mouth of the capture funnel, where a ring dropping onto the stake is caught and guided down.")]
+    [Tooltip("How far off the stack axis (world units, horizontal) a piece's center may be and still get captured NEAR THE POST TOP — the wide mouth of the capture funnel, where a piece dropping onto the goal is caught and guided down.")]
     public float captureRadius = 0.6f;
-    [Tooltip("Capture radius AT the seated slot (world units) — the TIGHT bottom of the funnel. A piece near the base must be nearly centered on the stake to be grabbed, so a ring merely leaning against the SIDE of the post is left loose and can be knocked off instead of sticking. The allowed radius widens linearly from this at the slot up to Capture Radius at the post top.")]
+    [Tooltip("Capture radius AT the seated slot (world units) — the TIGHT bottom of the funnel. A piece near the base must be nearly centered on the goal to be grabbed, so a piece merely leaning against the SIDE of the post is left loose and can be knocked off instead of sticking. The allowed radius widens linearly from this at the slot up to Capture Radius at the post top.")]
     public float seatedCaptureRadius = 0.25f;
     [Tooltip("How far BELOW the next slot (world units, along the stack axis) a piece's center may be and still get captured.")]
     public float captureVerticalWindow = 0.9f;
-    [Tooltip("How far ABOVE the next slot the capture window reaches. Tall on purpose: these goals are STAKES — a ring piece must be caught near the top of the post and guided down around it, or it just deflects off the post top and slides away. Baked from the goal's own height by the Add Goal Stack Magnets tool.")]
+    [Tooltip("How far ABOVE the next slot the capture window reaches. Tall on purpose: a goal is a POST — a piece must be caught near the top of the post and guided down around it, or it just deflects off the post top and slides away. Baked from the goal's own height by the Add Goal Stack Magnets tool.")]
     public float captureHeight = 3.5f;
     [Tooltip("A piece moving SIDEWAYS (across the stack axis) faster than this (world units/sec) is not captured — it's flying past the goal, not landing on it.")]
     public float maxCaptureLinearSpeed = 3f;
@@ -98,7 +98,7 @@ public class GoalStackMagnet : MonoBehaviour
     [Header("Rigid seated hold")]
     [Tooltip("Lock seated pieces into a rigid column: a piece that has settled stops colliding with the " +
              "OTHER pieces in its stack, and the magnet then holds it to its exact slot from all " +
-             "directions (a bump can't shove one ring up through the ring above it). It stays solid to " +
+             "directions (a bump can't shove one piece up through the piece above it). It stays solid to " +
              "the robot and a hard ram still knocks a piece off. Off = the older soft one-directional magnet.")]
     public bool rigidSeatedHold = true;
     [Tooltip("How firmly a SEATED piece is locked to its slot in rigid mode: the most per-step velocity/spin " +
@@ -109,19 +109,19 @@ public class GoalStackMagnet : MonoBehaviour
     public float rigidHoldPerStep = 25f;
 
     [Header("Orientation")]
-    [Tooltip("Hold each piece the way it was DROPPED instead of standing it upright — a ring goes onto " +
-             "the stake in the attitude it fell in, and pieces seat in the order they land (lowest " +
+    [Tooltip("Hold each piece the way it was DROPPED instead of standing it upright — a piece goes onto " +
+             "the goal in the attitude it fell in, and pieces seat in the order they land (lowest " +
              "first), so a cup that fell under a pin stays under it. The magnet still centres pieces on " +
-             "the stake and spaces them, it just no longer rotates them to a fixed pose. Off = the old " +
+             "the goal and spaces them, it just no longer rotates them to a fixed pose. Off = the old " +
              "look: every piece is turned so its long axis stands along the stack.")]
     public bool keepDroppedOrientation = true;
 
     [Header("Stack")]
     [Tooltip("Most pieces this goal holds; further pieces are simply not captured (they stay loose on top). " +
-             "This is a HEADROOM cap, not a physical one — the stake itself only runs ~2.4u above the pocket, " +
+             "This is a HEADROOM cap, not a physical one — the goal itself only runs ~2.4u above the pocket, " +
              "so at the 0.86u pitch the pieces above roughly the third slot are already off the end of the post " +
              "and are held by the magnet alone. Raise it for more capacity; lower it to stop the column growing " +
-             "past the stake.")]
+             "past the goal.")]
     public int maxStack = 10;
     [Tooltip("Per-piece-type rest height / stack spacing, matched by name prefix. Baked from the piece meshes by the Add Goal Stack Magnets tool; tune here.")]
     public List<PieceProfile> pieceProfiles = new List<PieceProfile>();
