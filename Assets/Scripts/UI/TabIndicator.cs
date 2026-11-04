@@ -59,7 +59,18 @@ public class TabIndicator : MonoBehaviour
 
     void Update()
     {
-        if (!animating) return;
+        if (!animating)
+        {
+            // The tabs can move AFTER the bar was seated: the layout group lays them out again when
+            // the screen changes size, and the bar is not one of its children. Seated once and never
+            // again, it was left behind, poking out beside the Robot tab on an iPad (seen in the store
+            // shots, 1.1 and 1.2). Under the right tab it is the tab's own colour, so this only ever
+            // showed as a stray line.
+            if (TryGetTarget(out Vector2 at, out float w) &&
+                ((rect.anchoredPosition - at).sqrMagnitude > 0.25f || Mathf.Abs(rect.sizeDelta.x - w) > 0.5f))
+                ApplyImmediate();
+            return;
+        }
         if (!TryGetTarget(out Vector2 position, out float width)) { animating = false; return; }
 
         float t = 1f - Mathf.Exp(-speed * Time.unscaledDeltaTime);
