@@ -878,9 +878,15 @@ public static class ClawBuilderValidation
         // Mutation: switch the flip back on in the very same coupler and repeat the crossing. It must
         // turn ~180 — otherwise "held its orientation" was measuring a sweep that couldn't show a flip
         // anyway, and this test would pass on a build that silently dropped the whole feature.
+        // The arm goes back to REST before the flip is switched on: the coupler measures the swing from
+        // wherever it first reads the arm (in a game, its rest pose at startup). Switched on at 160 it
+        // took 160 as rest, put the midpoint at 80, never saw it crossed, and turned the claw 0 degrees.
+        RampArm(f.armBody, coupler, 160f, 0f);
+        SettleArm(f.armBody, coupler, 0f, 300);
         coupler.flipPastMidpoint = true;
         coupler.BakeDrive();
-        RampArm(f.armBody, coupler, 160f, 80f);
+        SettleArm(f.armBody, coupler, 0f, 50);
+        RampArm(f.armBody, coupler, 0f, 80f);
         SettleArm(f.armBody, coupler, 80f, 300);
         Quaternion mutantBefore = f.flip.transform.rotation;
         RampArm(f.armBody, coupler, 80f, 160f);

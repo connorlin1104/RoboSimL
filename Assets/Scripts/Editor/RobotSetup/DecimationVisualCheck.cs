@@ -58,6 +58,12 @@ public sealed class DecimationVisualCheck : System.IDisposable
     public DecimationVisualCheck(int pixelTolerance = RobotPixelTolerance)
     {
         this.pixelTolerance = pixelTolerance;
+        // Without a graphics device (Unity -nographics) every render fails and comes back blank, and two
+        // blank pictures score 0 — "identical" — so every part would pass at the harshest ratio.
+        // Seen 2026-11-03 on a showcase bake. Refuse instead of reducing blind.
+        if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+            throw new System.InvalidOperationException(
+                "The look check needs a graphics device to render with. Run Unity without -nographics.");
         preview = new PreviewRenderUtility();
         preview.camera.orthographic = true;
         preview.camera.clearFlags = CameraClearFlags.SolidColor;
