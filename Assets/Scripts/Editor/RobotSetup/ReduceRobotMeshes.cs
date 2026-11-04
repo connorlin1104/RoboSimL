@@ -111,7 +111,7 @@ public class ReduceRobotMeshesWindow : EditorWindow
 
 public static class ReduceRobotMeshes
 {
-    private const string MeshFolder = "Assets/RobotMeshes";
+    internal const string MeshFolder = "Assets/RobotMeshes";
 
     // Headless entry: -executeMethod ReduceRobotMeshes.RunBatch -robot <name> [-keep 0.08] [-lookTheSame]
     //
@@ -448,7 +448,7 @@ public static class ReduceRobotMeshes
         }
     }
 
-    private static string Sanitize(string name)
+    internal static string Sanitize(string name)
     {
         var sb = new StringBuilder(name.Length);
         foreach (char c in name.Trim())

@@ -42,13 +42,21 @@ using UnityEngine;
 // is sensitive: a load-proportional torque split was tried on 2026-09-06 and read here as 654V_v1
 // turning 0 degrees where it had turned 455. See RobotMotorController's note on why that is gone.
 // The wheel droop links (2026-09-07) are the standing case: they are correct, they are shipped, and
-// they read RED here on 360RpmDrivetrain and 654V_v1 for a reason the share makes plain — with all
-// three wheels of a rail on the floor instead of two, the wheels sit at different radii from the
-// turn centre and are all driven at one rail speed, so they must scrub against each other. 654V_v2
-// and 654V_v3 are untouched (0.024 -> 0.029 and 0.017 -> 0.012). The bar is NOT the thing to move
-// here: it was re-derived onto the share and still reads red, which is the honest answer. Commit
-// 3fe30b3 is the change, WheelDroopRig the mechanism, and Probe Sideways Shove the other half of
-// what the links did to lateral grip.
+// they read RED here on 360RpmDrivetrain and 654V_v1 (0.002 -> 0.790 and 0.017 -> 0.661), while
+// 654V_v2 and 654V_v3 are untouched (0.024 -> 0.029 and 0.017 -> 0.012). The bar is NOT the thing to
+// move here: it was re-derived onto the share and still reads red, which is the honest answer.
+//
+// THE EXPLANATION WRITTEN HERE FIRST WAS WRONG (corrected 2026-11-03). It said the wheels of a rail
+// sit at different radii from the turn centre and must scrub. They do not have to: every point on a
+// line parallel to the rail has the SAME velocity along the rail, whatever its distance from the turn
+// centre, so a rail's wheels agree in their rolling direction and only their SIDEWAYS speeds differ —
+// which is the omni rollers' job. What is really happening was found by WheelTyreValidation's
+// roll-out check, red on the same two robots: released out of a full-throttle full-turn arc, 4 of
+// 360Rpm's 6 wheels read LOCKED for up to 0.26 s and 6 of 654V_v1's 8 for up to 0.35 s, while a
+// straight or gentle release locks none. Wheels STOPPING mid-turn is what puts the slip share at
+// 0.7-0.8. Lead, not proven: the tyre sets ONE friction coefficient per contact, keyed on lateral
+// slip, so a wheel sliding sideways loses its rolling grip too and the brake stops it. Commit 3fe30b3
+// is the change, WheelDroopRig the mechanism.
 public static class MovingTurnValidation
 {
     private const int SettleSteps = 60;

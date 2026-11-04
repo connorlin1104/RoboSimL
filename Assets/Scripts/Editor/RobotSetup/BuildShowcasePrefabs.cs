@@ -706,7 +706,7 @@ public static class BuildShowcasePrefabs
         }
     }
 
-    private static string ShowcasePath(string id)
+    internal static string ShowcasePath(string id)
     {
         var safe = new StringBuilder(id.Length);
         foreach (char c in id) safe.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
@@ -715,7 +715,7 @@ public static class BuildShowcasePrefabs
 
     // The merged meshes, one file per robot beside its showcase. A sub-asset of the prefab would be
     // tidier, but SaveAsPrefabAsset rewrites the file and would take them with it on every re-bake.
-    private static string MeshesPath(string id)
+    internal static string MeshesPath(string id)
     {
         var safe = new StringBuilder(id.Length);
         foreach (char c in id) safe.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');

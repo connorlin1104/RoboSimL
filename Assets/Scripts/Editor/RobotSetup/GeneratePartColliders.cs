@@ -118,7 +118,7 @@ public static class GeneratePartColliders
     private const uint VhacdDownsampling = 2;
     private const double VhacdMinVolumePerHull = 0.000001;
     // Hull meshes must be persisted or the saved scene's MeshColliders reference dead meshes.
-    private const string HullAssetRootFolder = "Assets/RobotColliders";
+    internal const string HullAssetRootFolder = "Assets/RobotColliders";
 
     // PCA axis fitting samples at most this many vertices (min/max projection still uses all
     // vertices, so the box always contains the whole mesh).

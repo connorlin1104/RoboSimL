@@ -1173,6 +1173,28 @@ public class RobotMotorController : MonoBehaviour
         bool chassisParked = rootBody == null
             || Planar(rootBody.linearVelocity).magnitude <= ParkGateSpeed(tuning.brakeG, Physics.gravity.y, dt);
 
+        // THE HOLD LATCHES (2026-11-03). The gate is one brake-step of speed, 0.157 u/s, and that is
+        // right for ARRIVING at rest. As the only test for STAYING at rest it was far too fine: a
+        // steady push from behind of half the robot's weight took 654V_v1/v2/v3 over it on the
+        // first or second step, every wheel dropped from the hold to the coast brake (0.16 g against
+        // a 0.5 g push) and the robot rolled 2.2 u in half a second. Any shove pushed a parked robot
+        // away. So once the robot has parked — sticks centred, chassis AND every wheel under their
+        // gates, exactly the state in which every wheel already got the hold — it stays held until
+        // the driver touches a stick. Arriving is unchanged, so the stop is unchanged. Every wheel
+        // has to be under its gate, not just the chassis: a robot spinning on the spot has almost no
+        // straight-line speed, and latching on the chassis alone would stop a released spin dead.
+        bool sticksCentred = stickThrow <= StickCentredThrow;
+        if (!sticksCentred) parkHoldLatched = false;
+        else if (!parkHoldLatched && chassisParked)
+        {
+            bool everyWheelStopped = true;
+            for (int i = 0; i < allWheels.Length && everyWheelStopped; i++)
+                if (allWheels[i] != null && allWheels[i].jointVelocity.dofCount > 0 &&
+                    Mathf.Abs(allWheels[i].jointVelocity[0] * Mathf.Rad2Deg) > movingDegPerSec)
+                    everyWheelStopped = false;
+            parkHoldLatched = everyWheelStopped;
+        }
+
         for (int i = 0; i < allWheels.Length; i++)
         {
             ArticulationBody wheel = allWheels[i];
@@ -1188,9 +1210,14 @@ public class RobotMotorController : MonoBehaviour
                 ? wheel.jointVelocity[0] * Mathf.Rad2Deg : 0f;
 
             SetForceLimit(i, DriveForceLimit(commandDegPerSec, spinDegPerSec, movingDegPerSec,
-                stickThrow, tuning.brakeTorque, tuning.stallTorque, chassisParked));
+                stickThrow, tuning.brakeTorque, tuning.stallTorque, chassisParked, parkHoldLatched));
         }
     }
+
+    // Below this the sticks count as centred for the parking latch. The input path already applies
+    // its own deadzone, so anything this small is a stick at rest, not a driver asking for motion.
+    private const float StickCentredThrow = 1e-3f;
+    private bool parkHoldLatched;
 
     // SHARING A RAIL'S TORQUE BY THE LOAD EACH WHEEL CARRIES — built, measured, removed. Do not
     // rebuild it without reading this.
@@ -1392,9 +1419,9 @@ public class RobotMotorController : MonoBehaviour
     // the brake ramp instead, which at centre stick is the coast torque: a hold, not a lock.
     public static float DriveForceLimit(float commandDegPerSec, float spinDegPerSec,
         float movingGateDegPerSec, float stickThrow, float brakeTorque, float stallTorque,
-        bool chassisParked)
+        bool chassisParked, bool holdLatched = false)
     {
-        bool parked = chassisParked && Mathf.Abs(spinDegPerSec) <= movingGateDegPerSec;
+        bool parked = holdLatched || (chassisParked && Mathf.Abs(spinDegPerSec) <= movingGateDegPerSec);
         if (parked || !BackDriven(commandDegPerSec, spinDegPerSec)) return stallTorque;
         return Mathf.Lerp(brakeTorque, stallTorque, Mathf.Clamp01(stickThrow));
     }
