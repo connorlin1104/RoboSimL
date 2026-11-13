@@ -57,6 +57,11 @@ using UnityEngine;
 // 0.7-0.8. Lead, not proven: the tyre sets ONE friction coefficient per contact, keyed on lateral
 // slip, so a wheel sliding sideways loses its rolling grip too and the brake stops it. Commit 3fe30b3
 // is the change, WheelDroopRig the mechanism.
+//
+// PROVEN AND FIXED 2026-11-12 by directional grip (WheelTyreModel): rolling grip stays whole and only
+// the sideways direction is let go, through the contact's target velocity. Slip share on the
+// full-turn cases went 0.790 -> 0.004 (360Rpm) and 0.662 -> 0.017 (654V_v1); v2/v3 within noise of
+// before. GREEN on all four robots.
 public static class MovingTurnValidation
 {
     private const int SettleSteps = 60;

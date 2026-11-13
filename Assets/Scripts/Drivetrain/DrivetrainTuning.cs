@@ -211,6 +211,11 @@ public static class DrivetrainTuning
         // rad/s figure here makes damping 57.3x too big, the force limit saturates over almost the
         // whole speed range, and the drive is a switch again — with no symptom except that it
         // "feels wrong".
+        //
+        // 2026-11-12: the damping alone NEVER did this — a PhysX velocity drive is a velocity
+        // constraint bounded by forceLimit, so it gave full stall torque at every speed below its
+        // target. Enforcing the curve on the force limit was built and measured out — it cost a third
+        // of the pivot and most of the moving turn; see "THE MOTOR CURVE" in RobotMotorController.
         r.damping = r.stallTorque / freeSpeedDeg;
 
         // The brake: what the drive may pull when the sticks are centred and a wheel still spins —

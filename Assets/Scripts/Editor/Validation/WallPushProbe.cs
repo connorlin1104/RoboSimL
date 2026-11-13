@@ -84,7 +84,7 @@ public static class WallPushProbe
             Vector3 centre = new Vector3(com.x, 5f, com.z) + fwd * (front + Gap) - wallNormal * (thickness / 2f);
             var wall = new GameObject("Wall");
             wall.transform.SetPositionAndRotation(centre, rot);
-            wall.AddComponent<BoxCollider>().size = new Vector3(40f, 10f, thickness);
+            var wallBox = wall.AddComponent<BoxCollider>(); wallBox.size = new Vector3(40f, 10f, thickness); wallBox.providesContacts = true;
             Physics.SyncTransforms();
             Vector3 along = Vector3.Cross(Vector3.up, -wallNormal).normalized;
 
@@ -112,6 +112,8 @@ public static class WallPushProbe
                     if (c.gameObject != wall) touching.Append(' ').Append(c.name).Append('(').Append(c.attachedArticulationBody != null ? c.attachedArticulationBody.name : "-").Append(')');
                 Trace.AppendLine(touching.ToString());
             }
+            WallId = wall.GetComponent<Collider>().GetEntityId(); WallImpulse = 0f; WallSteps = 0;
+            Physics.ContactEvent += OnContact;
             Vector3 start = Com(bodies);
             float startYaw = Yaw(root, fwd);
             float minAlong = 0f, maxAlong = 0f, minYaw = 0f, maxYaw = 0f;
@@ -148,8 +150,10 @@ public static class WallPushProbe
                     Trace.AppendLine(row.ToString());
                 }
             }
+            Physics.ContactEvent -= OnContact;
+            float wallForce = WallImpulse / Mathf.Max(WallSteps, 1) / ValidationUtil.StepSeconds;
             float spin = 0f; foreach (ArticulationBody w in wheels) spin += Mathf.Abs(w.jointVelocity[0] * Mathf.Rad2Deg) / wheels.Length;
-            return $"mean wheel spin {spin,5:0} deg/s, along the wall {maxAlong - minAlong,5:0.00} u ({slideFlips,2} reversals), " +
+            return $"wall force {wallForce / Mathf.Max(weight, 1e-3f):0.00} W, mean wheel spin {spin,5:0} deg/s, along the wall {maxAlong - minAlong,5:0.00} u ({slideFlips,2} reversals), " +
                    $"yaw {maxYaw - minYaw,5:0.0} deg ({yawFlips,2} reversals), " +
                    $"external lateral up to {maxExt / Mathf.Max(weight, 1e-3f):0.00} W, " +
                    $"lowest mu {(minMu <= 1f ? minMu.ToString("0.00") : "-")}";
@@ -158,6 +162,21 @@ public static class WallPushProbe
     }
 
     private static StringBuilder Trace;
+    private static EntityId WallId;
+    private static float WallImpulse;
+    private static int WallSteps;
+
+    private static void OnContact(PhysicsScene scene, Unity.Collections.NativeArray<ContactPairHeader>.ReadOnly headers)
+    {
+        WallSteps++;
+        for (int h = 0; h < headers.Length; h++)
+            for (int p = 0; p < headers[h].pairCount; p++)
+            {
+                ContactPair pair = headers[h].GetContactPair(p);
+                if (pair.colliderEntityId != WallId && pair.otherColliderEntityId != WallId) continue;
+                for (int i = 0; i < pair.contactCount; i++) WallImpulse += pair.GetContactPoint(i).impulse.magnitude;
+            }
+    }
 
     public static void RunBatchThrottle() => ValidationUtil.RunBatch("Wall Push Throttle", () =>
     {

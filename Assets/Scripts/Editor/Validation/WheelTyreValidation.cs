@@ -74,6 +74,9 @@ public static class WheelTyreValidation
 
     // Once it IS sliding, the tyre is the whole difference: same breakaway (there is no lateral
     // motion yet, so the tyre has not engaged), then three times the distance. Measured 2.9x-3.3x.
+    // 2026-11-12: the distance is now compared pushed THROUGH A BOX (see LateralBreakaway's
+    // viaContact) — directional grip holds against a contact-free force. Measured through the box:
+    // 7.6x-15x with directional grip, 5.3x-22x with the old tyre.
     private const float MinTyreSlideRatio = 2f;
 
     // What a settled manoeuvre may do, per second and per step, in the things a driver can feel: a
@@ -246,7 +249,8 @@ public static class WheelTyreValidation
     // A frictionless, weightless box the size of the robot's side, one finger off its right flank,
     // free only to move sideways. Dynamic, not kinematic: a kinematic pusher cannot be stopped and
     // would shove an isotropic robot just as far, which is exactly the comparison this must not lose.
-    private static Rigidbody MakePusher(ArticulationBody root, Vector3 right, Vector3 fwd, float mass)
+    private static Rigidbody MakePusher(ArticulationBody root, Vector3 right, Vector3 fwd, float mass,
+        float gap = 0.05f)
     {
         Bounds b = new Bounds(root.transform.position, Vector3.zero);
         bool any = false;
@@ -270,7 +274,7 @@ public static class WheelTyreValidation
         float length = Mathf.Max(3f, Mathf.Abs(Vector3.Dot(b.size, fwd)) + 1f);
         go.transform.rotation = Quaternion.LookRotation(fwd, Vector3.up);
         go.transform.localScale = new Vector3(0.6f, height, length);
-        Vector3 centre = b.center + right * (extentRight + 0.05f + 0.3f);
+        Vector3 centre = b.center + right * (extentRight + gap + 0.3f);
         centre.y = b.min.y + height * 0.5f + 0.05f;
         go.transform.position = centre;
 
@@ -339,6 +343,12 @@ public static class WheelTyreValidation
     // grip on lateral MOTION — so the measure is the slide by the end of the ramp. Measured: v2 0.82,
     // v3 0.81, 360Rpm 0.80 of the all-omni slide with the pair; exactly 1.00 when the pair does not reach
     // the tyres. This is a WIRING check, as its message has always said: is the pair there or not.
+    //
+    // 2026-11-12: the ramp is now delivered THROUGH A BOX resting against the flank, not as a force at
+    // the centre of mass. The omni tyre's sideways grip became a target velocity (directional grip,
+    // WheelTyreModel), which holds against a force no contact reports, so the bare force made the
+    // omnis grip like the pair (1.14). Through the box: v2 0.63 with directional grip, 0.60 with the
+    // old one-number tyre — the same answer either way, and still 1.00 by construction when unwired.
     private const float MaxPairSlideShare = 0.9f;
 
     private static int ATractionPairResistsTheShove(StringBuilder lines, float omniSlide)
@@ -346,9 +356,10 @@ public static class WheelTyreValidation
         GameObject prefab = FindRobot(SpikeRobot);
         float withPair = SustainedPush(prefab, tyreOn: true, out string detail, out float roll, out _,
             RobotMotorController.TractionPair.Middle, fromBehind: false);
-        LateralBreakaway(prefab, tyreOn: true, out string omniRamp, out float omniTravel);
+        LateralBreakaway(prefab, tyreOn: true, out string omniRamp, out float omniTravel,
+            RobotMotorController.TractionPair.None, viaContact: true);
         LateralBreakaway(prefab, tyreOn: true, out string pairRamp, out float pairTravel,
-            RobotMotorController.TractionPair.Middle);
+            RobotMotorController.TractionPair.Middle, viaContact: true);
         float share = omniTravel > 1e-4f ? pairTravel / omniTravel : 1f;
         lines.AppendLine($"  sideways with a MIDDLE traction pair, '{prefab.name}': the ramp slid it {pairTravel:0.00} u " +
                          $"against {omniTravel:0.00} all-omni ({share:0.00} of it); the box slid it {withPair:0.00} u " +
@@ -382,6 +393,18 @@ public static class WheelTyreValidation
 
     private static float LateralBreakaway(GameObject prefab, bool tyreOn, out string detail, out float travel,
         RobotMotorController.TractionPair pair = RobotMotorController.TractionPair.None)
+        => LateralBreakaway(prefab, tyreOn, out detail, out travel, pair, viaContact: false);
+
+    // viaContact: the same ramp, delivered by a frictionless box resting against the right flank
+    // (a millimetre off, so it lands at a crawl rather than as an impact) instead of a force at the
+    // centre of mass. Every sideways force a robot meets in the game arrives through a contact, and
+    // since 2026-11-12 the omni tyre answers a contact and a contact-free force differently: its
+    // sideways grip is a TARGET velocity (WheelTyreModel), which lets a slide that is already
+    // happening carry on but holds against a force that appears inside the step and that the tyre
+    // cannot see. A contact it can see — the external-shove term lowers the friction — so the
+    // statements about how an omni slides are made through one.
+    private static float LateralBreakaway(GameObject prefab, bool tyreOn, out string detail, out float travel,
+        RobotMotorController.TractionPair pair, bool viaContact)
     {
         SimulationMode previous = Physics.simulationMode;
         try
@@ -397,13 +420,18 @@ public static class WheelTyreValidation
             float mass = DrivetrainTuning.MeasureTotalMass(root);
             float weight = mass * Mathf.Abs(Physics.gravity.y);
             Vector3 push = -Vector3.ProjectOnPlane(motor.DriveRightWorld, Vector3.up).normalized;
+            Rigidbody pusher = viaContact
+                ? MakePusher(root, -push, Vector3.Cross(-push, Vector3.up).normalized * -1f, mass, gap: 0.001f)
+                : null;
+            if (pusher != null) Physics.SyncTransforms();
             Vector3 start = Com(bodies);
             float dt = ValidationUtil.StepSeconds;
             float broke = -1f, fraction = 0f, moved = 0f, roll = 0f;
             for (int i = 0; i < BreakawaySteps; i++)
             {
                 fraction = BreakawayRampPerSecond * (i * dt);
-                root.AddForceAtPosition(push * (fraction * weight), Com(bodies), ForceMode.Force);
+                if (pusher != null) pusher.AddForce(push * (fraction * weight), ForceMode.Force);
+                else root.AddForceAtPosition(push * (fraction * weight), Com(bodies), ForceMode.Force);
                 TipOverValidation.StepDriven(motor, 0f, 0f, 1);
                 moved = Vector3.Dot(Com(bodies) - start, push);
                 roll = Mathf.Max(roll, Vector3.Angle(root.transform.up, Vector3.up));
@@ -505,6 +533,12 @@ public static class WheelTyreValidation
             if (prefab == null || prefab.GetComponentInChildren<RobotMotorController>() == null) continue;
             float off = LateralBreakaway(prefab, tyreOn: false, out string offDetail, out float offTravel);
             float on = LateralBreakaway(prefab, tyreOn: true, out string onDetail, out float onTravel);
+            // The slide comparison goes through a contact (see LateralBreakaway); the breakaway bounds
+            // above stay on the force at the centre of mass, the friction cone with nothing in the way.
+            LateralBreakaway(prefab, tyreOn: false, out string offContact, out float offTravelContact,
+                RobotMotorController.TractionPair.None, viaContact: true);
+            LateralBreakaway(prefab, tyreOn: true, out string onContact, out float onTravelContact,
+                RobotMotorController.TractionPair.None, viaContact: true);
             lines.AppendLine($"  lateral breakaway, '{prefab.name}': tyre OFF {offDetail}; tyre ON {onDetail}");
 
             ValidationUtil.Assert(off >= MinBreakawayFraction,
@@ -517,10 +551,11 @@ public static class WheelTyreValidation
                 "cone and nothing may hold past it. A robot that cannot be pushed sideways at all is standing " +
                 "on a contact set the solver is over-constraining, which is what two-of-three coplanar wheels " +
                 $"on a rigid rail used to do here. ({offDetail})");
-            ValidationUtil.Assert(onTravel >= offTravel * MinTyreSlideRatio,
-                $"'{prefab.name}' slid {onTravel:0.0} u with the tyre on against {offTravel:0.0} without, " +
-                $"under {MinTyreSlideRatio:0.0#}x — once a robot IS sliding sideways the omni tyre is the " +
-                $"whole difference, and here it made almost none. ({onDetail}; tyre OFF: {offDetail})");
+            lines.AppendLine($"    pushed through a box instead: tyre OFF {offContact}; tyre ON {onContact}");
+            ValidationUtil.Assert(onTravelContact >= offTravelContact * MinTyreSlideRatio,
+                $"'{prefab.name}' slid {onTravelContact:0.0} u with the tyre on against {offTravelContact:0.0} without, " +
+                $"pushed through a box, under {MinTyreSlideRatio:0.0#}x — once a robot IS sliding sideways the omni " +
+                $"tyre is the whole difference, and here it made almost none. ({onContact}; tyre OFF: {offContact})");
             checks += 3;
         }
         return checks;

@@ -46,6 +46,30 @@ using UnityEngine;
 //     controller projects that onto its own right axis. Something pushing the robot sideways lowers
 //     the friction under it; nothing else does.
 //
+// DIRECTIONAL GRIP (2026-11-12), and why the rule above was not enough on its own. PhysX gives a
+// contact ONE friction number, so lowering it for a sideways slide lowered the ROLLING grip with it.
+// Out of a full-throttle full-turn arc, 360RpmDrivetrain and 654V_v1 slid sideways hard enough that
+// every tyre dropped to ~0.06 in every direction; the floor could no longer turn the wheels, the
+// coast brake stopped them, and 4 of 6 (6 of 8 on v1) read LOCKED for up to 0.35 s with the chassis
+// still doing 9 u/s. The same thing let those two crab out of a full-turn arc at 35-38 degrees of
+// drift while v2/v3 held under 6. A real omni keeps its rolling grip whatever its rollers are doing.
+//
+// So the rule above now decides only the SIDEWAYS grip, and it is applied through the contact's
+// target velocity: the friction number stays at the material's 0.8 (rolling grip whole), and the
+// solver is asked to leave in place all of the contact's sideways slip except what a friction of
+// that rule's value would remove in one step (mu * g * dt). Measured: no wheel locks on any robot
+// out of any release, MovingTurnValidation passes on all four, drift out of a full-turn arc is
+// 3.6 deg on 360Rpm and 10 on v1, and v2/v3 move by a few percent. ROBOSIM_TYRE_ISOTROPIC=1 (or
+// DirectionalGrip = false) restores the one-number tyre for an A/B.
+//
+// THE PRICE, and it is a real one: the target is built from the velocity at the START of the step,
+// so a sideways force that appears INSIDE the step, from nothing a contact reports, meets the full
+// 0.8 until the robot is already sliding. In the game every sideways force on a robot arrives
+// through a contact — a robot, a wall, a goal — and those still lower the friction through the
+// external-shove term, so a shove slides an omni robot exactly as before (box shove 2.29 u against
+// 2.38). What does not slide it any more is a force written straight onto the chassis, which only
+// a validator does; WheelTyreValidation's slide checks push through a box for that reason.
+//
 // A TRACTION wheel is registered as such and skipped: its contacts keep the material friction, so it
 // resists sideways motion at full grip — a pair of them is what makes a sideways hit cost something
 // and a turn hold its line. See RobotMotorController.tractionPair.
@@ -85,6 +109,15 @@ public static class WheelTyreModel
         }
     }
 
+    // DIRECTIONAL GRIP (2026-11-12) — see the long note above OnContactModify. On by default;
+    // ROBOSIM_TYRE_ISOTROPIC=1 (or a validator flipping this) restores the one-number tyre for an A/B.
+    private static bool directional = true;
+    public static bool DirectionalGrip
+    {
+        get => directional;
+        set { directional = value; if (native.IsCreated) RebuildNative(); }
+    }
+
     private sealed class WheelSlot
     {
         public RobotMotorController owner;
@@ -115,6 +148,8 @@ public static class WheelTyreModel
         public float externalScale;     // force
         public float externalLateral;   // force, published for the coming step
         public bool traction;
+        public bool directional;        // lateral grip through the target velocity, rolling grip kept whole
+        public float gravityDt;         // |g| * fixed dt: the speed a mu of 1 removes in one step
         public float lastMu;            // what the callback last set on this wheel (-1: no contact yet)
         public float lastLateral;       // the lateral velocity it keyed that on, u/s
     }
@@ -149,6 +184,7 @@ public static class WheelTyreModel
         {
             envChecked = true;
             if (System.Environment.GetEnvironmentVariable("ROBOSIM_TYRE_OFF") == "1") frictionEnabled = false;
+            if (System.Environment.GetEnvironmentVariable("ROBOSIM_TYRE_ISOTROPIC") == "1") directional = false;
         }
         Unregister(owner);
         Prune();
@@ -277,6 +313,8 @@ public static class WheelTyreModel
                                           * (robot != null ? robot.weight : 1f), 1e-3f),
                 externalLateral = 0f,
                 traction = w.traction,
+                directional = directional,
+                gravityDt = Mathf.Abs(Physics.gravity.y) * Time.fixedDeltaTime,
                 lastMu = -1f,
                 lastLateral = 0f,
             };
@@ -521,7 +559,29 @@ public static class WheelTyreModel
                 float lat = Vector3.Dot(rel, lateral) / latMag;
 
                 float x = lat / t.lateralScale;
-                float mu = t.muLat + (t.muLong - t.muLat) / (1f + x * x + extTerm);
+                float muSide = t.muLat + (t.muLong - t.muLat) / (1f + x * x + extTerm);
+
+                float materialDynamic = pair.GetDynamicFriction(i);
+                float mu;
+                if (t.directional)
+                {
+                    // Rolling grip stays whole; only the sideways direction is let go. PhysX has one
+                    // friction number per point, so the sideways side goes through the TARGET
+                    // velocity instead: the solver is asked to leave this much sideways slip in
+                    // place, i.e. to take out only what a friction of muSide would take out in one
+                    // step (muSide * g * dt). Along the rolling direction the target is zero, so the
+                    // full material grip holds the tread to the floor there — which is what an omni
+                    // does, and what keeps a wheel turning with the ground while the robot slides.
+                    // The external-shove term still lowers the number itself: at rest there is no
+                    // slip to leave in place, so a steady push would otherwise meet the full 0.8.
+                    float keep = Mathf.Max(Mathf.Abs(lat) - muSide * t.gravityDt, 0f) * Mathf.Sign(lat);
+                    Vector3 lateralUnit = lateral / latMag;
+                    // The target is the velocity of the pair's FIRST body relative to its second;
+                    // `rel` is the wheel relative to the other body, so flip it when the wheel is second.
+                    pair.SetTargetVelocity(i, lateralUnit * (other ? -keep : keep));
+                    mu = t.muLat + (t.muLong - t.muLat) / (1f + extTerm);
+                }
+                else mu = muSide;
 
                 // Only ever LOWER what the materials gave this contact. The wheel's own 0.8 wins the
                 // combine against the floor, so on the floor this is the blend; against a
@@ -529,7 +589,6 @@ public static class WheelTyreModel
                 // it must not push the contact UP to 0.8 — measured: a box pushing a robot from
                 // behind touched a rear wheel and dragged on its rolling surface, 30% more resistance
                 // than with the tyre off.
-                float materialDynamic = pair.GetDynamicFriction(i);
                 if (mu > materialDynamic) mu = materialDynamic;
 
                 // Static = dynamic. The material's 0.9/0.8 split gives a LOCKED inner wheel dragged
@@ -539,7 +598,8 @@ public static class WheelTyreModel
                 // tread has no such catch: the rollers are already turning.
                 pair.SetDynamicFriction(i, mu);
                 pair.SetStaticFriction(i, Mathf.Min(pair.GetStaticFriction(i), mu));
-                if (mu < lowest) lowest = mu;
+                float reported = t.directional ? Mathf.Min(muSide, mu) : mu;
+                if (reported < lowest) lowest = reported;
                 t.lastLateral = lat;
             }
             if (points > 0) t.lastMu = lowest;
