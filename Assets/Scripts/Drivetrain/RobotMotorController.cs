@@ -1422,9 +1422,30 @@ public class RobotMotorController : MonoBehaviour
         bool chassisParked, bool holdLatched = false)
     {
         bool parked = holdLatched || (chassisParked && Mathf.Abs(spinDegPerSec) <= movingGateDegPerSec);
-        if (parked || !BackDriven(commandDegPerSec, spinDegPerSec)) return stallTorque;
+        if (parked) return stallTorque;
+        if (!BackDriven(commandDegPerSec, spinDegPerSec)) return stallTorque;
         return Mathf.Lerp(brakeTorque, stallTorque, Mathf.Clamp01(stickThrow));
     }
+
+    // THE MOTOR CURVE — built and measured out, 2026-11-12. Read before rebuilding it.
+    //
+    // A DC motor at a fraction s of full voltage makes stall * (s - w/free). DrivetrainTuning
+    // describes exactly that (damping = stall/free), but a PhysX velocity drive is a velocity
+    // constraint bounded by forceLimit (see the parking-gate note above), so the drive gives full
+    // stall torque at every speed below its target and the damping shapes nothing. Visible pushing
+    // a wall: at 0.3 stick 360RpmDrivetrain's wheels spin at the commanded 643 deg/s where a real
+    // motor would stall with them gripping, and a spinning wheel has no sideways grip, so the robot
+    // wanders along the wall (WallPushProbe: 0.46-1.12 u in 3 s at 0.3-0.6 stick).
+    //
+    // Capping the accelerating quadrant's force limit on the curve every step fixed that (0.01-0.06 u)
+    // and cost far too much everywhere else, measured on the bare floor (curve off -> on):
+    //     standing pivot, deg in 1.5 s     360Rpm 549 -> 360   v1 469 -> 293   v2 342 -> 222   v3 336 -> 224
+    //     arc, full throttle + half turn   360Rpm 130 -> 61    v1 104 -> 31    v2  69 -> 16    v3  69 -> 13
+    //     1 s launch, u                    360Rpm 14.5 -> 13.3 ... v3 8.1 -> 7.9
+    // Turning while driving is the outer rail pushing past the inner, and an outer rail already at its
+    // commanded speed has no torque left on the curve. Every turn rate the drivetrain was tuned and
+    // driven against would have to be re-derived. Not worth it for a wall push at part throttle.
+
 
     // The wheel is turning the motor rather than the other way round: commanded into reverse,
     // commanded to a dead stop, or commanded SLOWER than it is turning. One definition, in one

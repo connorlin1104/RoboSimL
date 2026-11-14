@@ -424,7 +424,8 @@ public static class TipOverValidation
                 "the solver fights every step.");
             ValidationUtil.Assert(result.rollTravel <= MaxRollTravelDeg,
                 $"'{prefab.name}' accumulated {result.rollTravel:0.0} degrees of roll travel in a turn " +
-                $"(limit {MaxRollTravelDeg}) while ending at {result.finalTilt:0.0} — it is shaking, not leaning.");
+                $"(limit {MaxRollTravelDeg}) while ending at {result.finalTilt:0.0} — it is shaking, not leaning. " +
+                $"({result.rollReversals} roll reversals, peak roll {result.peakRoll:0.0}, yawed {result.yaw:0} deg)");
 
             // THE LIFT ITSELF, which every check above is blind to. See the measurement in DriveATurn:
             // the assertions above are all about the root, and a robot whose frame is rock steady
