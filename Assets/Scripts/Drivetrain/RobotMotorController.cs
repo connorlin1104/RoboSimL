@@ -143,13 +143,20 @@ public class RobotMotorController : MonoBehaviour
              "only way the robot could turn at all; the tyre model took that job.)")]
     [Range(1f, 6f)]
     public float driveForceTractionMultiple = DrivetrainTuning.DefaultDriveForceTractionMultiple;
+    [Tooltip("Watts of V5 motor on the drivetrain: 11 per 11 W motor, 5.5 per 5.5 W one (44 = four 11 W). " +
+             "Set, how fast the robot may speed up, slow down and reverse in a straight line comes from " +
+             "those motors, Max Wheel Rpm and its weight, so a heavy robot is slower off the line than a " +
+             "light one on the same motors. Turning is not affected. Keep it equal " +
+             "to the Model Catalog's Drive Watts (DriveFeelValidation checks). 0 = use the traction " +
+             "multiple above instead.")]
+    public float driveWatts;
     [Tooltip("How hard the motors may brake on ALL-OMNI wheels, as a fraction of the tyres' grip. " +
              "This is also the brake pedal: centred sticks stop the robot with exactly this torque. " +
              "Low, because omni rollers have no sideways grip and a small contact patch forwards — " +
              "an all-omni robot rolls on when you let go, and that roll-out is the drift it has. " +
              "Every robot brakes on this number, traction pair or not: where a traction wheel " +
              "differs is its sideways grip, and that lives in the tyre, not the brake.")]
-    [Range(0.1f, 1.5f)]
+    [Range(0.05f, 1.5f)]
     public float omniBrakeFraction = DrivetrainTuning.DefaultOmniBrakeFraction;
     [Tooltip("Which pair of drive wheels, if any, are TRACTION wheels — rubber that grips sideways as " +
              "hard as it grips forwards — rather than omnis. None = an all-omni drive, which slides " +
@@ -164,7 +171,7 @@ public class RobotMotorController : MonoBehaviour
     [Tooltip("How far the body leans under acceleration and braking, in degrees at the traction " +
              "limit. VISUAL ONLY — it moves nothing the physics can feel. 0 disables it.")]
     [Range(0f, 8f)]
-    public float loadTransferPitchDeg = 2.5f;
+    public float loadTransferPitchDeg = 3.5f;
     [Tooltip("How quickly the lean follows the throttle, in rad/s. This is a suspension frequency: " +
              "a car's pitch mode is around 1.5-2 Hz, which is 10-13 here.")]
     public float loadTransferFrequency = 12f;
@@ -558,7 +565,8 @@ public class RobotMotorController : MonoBehaviour
             DrivetrainTuning.MeasureFriction(allWheels),
             Physics.gravity.y,
             driveForceTractionMultiple,
-            BrakeFraction);
+            BrakeFraction,
+            driveWatts);
 
         if (!autoTuneDrive)
         {
@@ -850,10 +858,13 @@ public class RobotMotorController : MonoBehaviour
         frontPivotOffset = driveForwardLocal * front + Vector3.up * contact;
         rearPivotOffset = driveForwardLocal * rear + Vector3.up * contact;
 
-        // Full lean at the friction cone, which is the hardest this robot can ever accelerate or
-        // stop. Sizing it off the tyres rather than a chosen number means a grippier robot leans
-        // further before it saturates, exactly as it should.
-        fullLeanAccel = Mathf.Max(tuning.tractionG * Mathf.Abs(Physics.gravity.y), 1e-3f);
+        // Full lean at the hardest this robot can ever accelerate or stop in a straight line: the
+        // friction cone, or its drive motors' limit if that is lower (DrivetrainTuning.motorAccel).
+        // Sizing it off the robot rather than a chosen number means a grippier robot leans further
+        // before it saturates, and a heavy robot on few watts still visibly lurches when a slammed
+        // reversal puts everything its motors have into it (2026-11-16, Connor: a full-forward to
+        // full-back switch "should be some like jerk"; 654V_v3 at 0.43 g leaned 1.5 deg of 2.5).
+        fullLeanAccel = Mathf.Max(Mathf.Min(tuning.tractionG * Mathf.Abs(Physics.gravity.y), tuning.motorAccel), 1e-3f);
     }
 
     // Where the lean is heading, and how it gets there. Runs on the physics step so the response is
@@ -1071,7 +1082,7 @@ public class RobotMotorController : MonoBehaviour
         // gate they park under Drive authority at target 0. Centre stick IS the brake pedal — no
         // dwell, no release, nothing for a stick swept through centre to accidentally trigger.
         throttleCommand = Slew(throttleCommand, throttleTarget,
-            throttleRisePerSec, throttleFallPerSec, dt);
+            ThrottleRate(throttleRisePerSec), ThrottleRate(throttleFallPerSec), dt);
         turnCommand = Slew(turnCommand, turnTarget, turnRisePerSec, turnFallPerSec, dt);
 
         // The turn rate blends with the throttle it is mixed against.
@@ -1297,6 +1308,20 @@ public class RobotMotorController : MonoBehaviour
     // time through the fall rate and out again through the rise rate. That is what makes the
     // result identical whether it's stepped at 100 Hz or 10 Hz, which in turn is what makes it
     // testable — and a full reversal takes exactly 1/fall + 1/rise seconds.
+    // THE MOTORS' LIMIT ON THE THROTTLE (2026-11-16). A full throttle command is the motors' free
+    // speed, so a robot whose motors can accelerate its mass at motorAccel can change its command by
+    // at most motorAccel / topSpeed per second — whichever of that and the configured ramp is slower.
+    // That is what makes a heavy robot on few watts slow off the line and slow to turn a slammed
+    // reversal around (654V_v3: 2.6 per second, 0.8 s from full forward to full back), while a light
+    // one on the same motors is still limited by the ramp it always had. The turn command is not
+    // touched: see "WHY NOT THE FORCE LIMIT ITSELF" in DrivetrainTuning.
+    public float ThrottleRate(float configured) => ThrottleRate(configured, tuning.motorAccel, tuning.topSpeed);
+
+    public static float ThrottleRate(float configured, float motorAccel, float topSpeed) =>
+        topSpeed > 0f && motorAccel > 0f && !float.IsInfinity(motorAccel)
+            ? Mathf.Min(configured, motorAccel / topSpeed)
+            : configured;
+
     public static float Slew(float current, float target, float rise, float fall, float dt)
     {
         if (current == target) return target;

@@ -57229,9 +57229,10 @@ MonoBehaviour:
   solverVelocityIterations: 8
   autoTuneDrive: 1
   driveForceTractionMultiple: 3
-  omniBrakeFraction: 0.2
+  driveWatts: 66
+  omniBrakeFraction: 0.1
   tractionPair: 0
-  loadTransferPitchDeg: 2.5
+  loadTransferPitchDeg: 3.5
   loadTransferFrequency: 12
   loadTransferDamping: 0.55
   inputDeadzone: 0.08

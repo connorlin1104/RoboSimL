@@ -23,6 +23,9 @@ using Object = UnityEngine.Object;
 // IF THAT SAFE-AREA ASSUMPTION EVER STOPS HOLDING — someone adds Screen.safeArea handling, or a notch inset — the Game
 // view stops matching the device and these shots become wrong in a way that still looks plausible. Capture on hardware
 // at that point.
+//   2026-11-16: PerfOverlay (the Show Performance Stats panel) now reads Screen.safeArea, to keep its labels out from
+//   under the notch. Nothing else does, and the panel is off in every store shot, so the shots are unaffected — but a
+//   shot taken WITH the stats on would put the panel 40 in where a phone puts it ~130 in.
 //
 // One press:
 //   1. Freezes the game where it is. Time.timeScale 0 stops physics and everything else that runs on game time, and the

@@ -55,6 +55,7 @@ public static class DriveFeelValidation
         checks += ScaleInvariance();
         checks += DegenerateInputs();
         checks += ShippedPrefabs();
+        checks += MotorWatts();
         return $"Validate Drive Feel: PASSED ({checks} checks).";
     }
 
@@ -565,12 +566,12 @@ public static class DriveFeelValidation
         ValidationUtil.Near(t.motorLimitedStick, 1f / 3f, 0.005f,
             "the first third of stick travel should be motor-limited, so fine control is real");
 
-        // Braking: the all-omni default, 0.2 of the traction budget — 0.2*2354.4 = 471 over 6
-        // wheels at r 0.37. With centre-stick as the brake pedal this is also the deceleration a
-        // release commands, which is why it is the number the wheel type gets to change.
-        ValidationUtil.Near(t.brakeTorque, 29.04f, 0.1f, "per-wheel braking-quadrant torque");
+        // Braking: the all-omni default, 0.1 of the traction budget — 0.1*2354.4 = 235 over 6
+        // wheels at r 0.37 (0.2 and 29.04 until 2026-11-16, when Connor asked for twice the coast).
+        // With centre-stick as the brake pedal this is also the deceleration a release commands.
+        ValidationUtil.Near(t.brakeTorque, 14.52f, 0.1f, "per-wheel braking-quadrant torque");
         ValidationUtil.Near(t.tractionG, 0.80f, 0.005f, "the tyres' grip is mu, so the friction cone is 0.8 g");
-        ValidationUtil.Near(t.brakeG, 0.16f, 0.005f, "an all-omni robot should coast at 0.2 of the friction cone");
+        ValidationUtil.Near(t.brakeG, 0.08f, 0.005f, "an all-omni robot should coast at 0.1 of the friction cone");
 
         // One traction limit's worth of torque at this wheel — 2354.4 over 6 wheels at r 0.37, a
         // third of stall — the diagnostic the probes print beside a force limit.
@@ -616,16 +617,18 @@ public static class DriveFeelValidation
 
         // brakeG is exactly mu * fraction, which is what makes this predictable from the constants
         // rather than emergent. Pinned so nobody re-tunes the feel by accident.
-        ValidationUtil.Near(omni.brakeG, 0.16f, 0.005f, "all-omni braking should be 0.2 of the 0.8 g cone");
+        ValidationUtil.Near(omni.brakeG, 0.08f, 0.005f, "all-omni braking should be 0.1 of the 0.8 g cone");
 
-        // The felt number for the reference 240 RPM robot: ~0.28 m of roll.
+        // The felt number for the reference 240 RPM robot: ~0.55 m of roll (0.28 m until 2026-11-16,
+        // when Connor asked for about double after driving it on the phone).
         float omniRollout = RolloutUnits(omni);
-        ValidationUtil.Near(omniRollout, 2.754f, 0.02f, "an all-omni robot's roll-out from full speed");
+        ValidationUtil.Near(omniRollout, 5.508f, 0.04f, "an all-omni robot's roll-out from full speed");
 
-        // The failure mode of tuning drift by feel: a robot that rolls for two thirds of a metre on
-        // a 240 RPM drive has stopped being drifty and started ignoring the driver. The old
-        // coast-on-release model died of exactly this.
-        ValidationUtil.Assert(omniRollout < 6f,
+        // The failure mode of tuning drift by feel: a robot that rolls on and on has stopped being
+        // drifty and started ignoring the driver. The old coast-on-release model died of exactly
+        // this. The ceiling was 6 u (0.6 m) while the brake was 0.2; Connor chose the doubled
+        // roll-out on 2026-11-16, so it sits at 8 u (0.8 m) — still a stop, not a glide.
+        ValidationUtil.Assert(omniRollout < 8f,
             $"an all-omni robot rolls {omniRollout:0.0} units ({omniRollout * 0.1f:0.00} m) after the " +
             "sticks are released — past this it reads as 'the brake does nothing', not as drift");
 
@@ -813,7 +816,8 @@ public static class DriveFeelValidation
                 DrivetrainTuning.MeasureFriction(wheels),
                 Physics.gravity.y,
                 motor.driveForceTractionMultiple,
-                motor.omniBrakeFraction);
+                motor.omniBrakeFraction,
+                motor.driveWatts);
 
             // The two design rules, checked against each REAL robot rather than one hand-written
             // configuration — a default that's fine for the 654V can still seize a robot with
@@ -853,6 +857,19 @@ public static class DriveFeelValidation
                 $"'{name}' brakes on {motor.BrakeFraction} rather than its Omni Brake Fraction " +
                 $"({motor.omniBrakeFraction}) — there is one brake, and this is it.");
 
+            // The watts on the drive motors live in two places — this controller, which drives with
+            // them, and the Model Catalog, whose home-screen chip shows them — and must agree.
+            var catalog = AssetDatabase.LoadAssetAtPath<RobotModelCatalog>(RoboSimPaths.RobotModelCatalog);
+            if (catalog != null)
+                foreach (RobotModelCatalog.Entry entry in catalog.models)
+                    if (entry != null && entry.prefab == prefab && entry.highlights != null && entry.highlights.driveWatts > 0f)
+                    {
+                        ValidationUtil.Assert(Mathf.Approximately(motor.driveWatts, entry.highlights.driveWatts),
+                            $"'{name}' drives on {motor.driveWatts} W of motor but its Model Catalog chip says " +
+                            $"{entry.highlights.driveWatts} W — set Drive Watts on its RobotMotorController to match");
+                        checked_++;
+                    }
+
             checked_ += 5 + wheels.Count * 2;
         }
 
@@ -860,6 +877,40 @@ public static class DriveFeelValidation
             throw new InvalidOperationException(
                 $"No robot prefabs with a RobotMotorController under {RoboSimPaths.RobotsFolder} — nothing was checked.");
         return checked_;
+    }
+
+    // THE MOTORS (2026-11-16): straight-line acceleration from the drive motors' watts, gearing and
+    // the robot's weight, applied as a cap on how fast the throttle command may change. Pinned on
+    // 654V_v3's real numbers (44 W, 450 RPM, 2.75 in omnis, 11.84 kg) and the identities around them.
+    private static int MotorWatts()
+    {
+        // 44 W * 210/11 / 450 = 1.867 N*m at the wheels.
+        ValidationUtil.Near(DrivetrainTuning.MotorStallTorqueNm(44f, 450f), 1.8667f, 0.001f, "44 W of V5 at 450 RPM");
+        // Speed for torque one for one: the same motors geared twice as fast give half the torque.
+        ValidationUtil.Near(DrivetrainTuning.MotorStallTorqueNm(44f, 225f), 2f * 1.8667f, 0.002f, "gearing trades torque for speed");
+        // Watts add: 66 W (six 11 W) is 1.5x 44 W (four).
+        ValidationUtil.Near(DrivetrainTuning.MotorStallTorqueNm(66f, 450f), 1.5f * 1.8667f, 0.002f, "watts add");
+
+        float radius = 0.349f, mass = 11.84f;
+        DrivetrainTuning.Result v3 = DrivetrainTuning.Compute(mass, radius, 6, 450f, 0.8f, -98.1f, 3f, 0.1f, 44f);
+        // 1.867 N*m * 100 / 0.349 u / 11.84 kg = 45.2 u/s^2, 0.46 g.
+        ValidationUtil.Near(v3.motorAccel, 45.17f, 0.2f, "654V_v3's straight-line motor acceleration");
+        // The force limit is NOT the motors' — see "WHY NOT THE FORCE LIMIT ITSELF" in DrivetrainTuning.
+        DrivetrainTuning.Result legacy = DrivetrainTuning.Compute(mass, radius, 6, 450f, 0.8f, -98.1f, 3f, 0.1f);
+        ValidationUtil.Near(v3.stallTorque, legacy.stallTorque, 1e-3f, "watts must not change the force limit");
+        ValidationUtil.Assert(float.IsPositiveInfinity(legacy.motorAccel), "no watts, no motor limit");
+
+        // The throttle ramp: the slower of the configured rate and motorAccel / topSpeed.
+        float rate = RobotMotorController.ThrottleRate(4f, v3.motorAccel, v3.topSpeed);
+        ValidationUtil.Near(rate, v3.motorAccel / v3.topSpeed, 1e-4f, "a heavy robot on few watts is ramped by its motors");
+        ValidationUtil.Assert(rate < 4f, $"654V_v3's throttle may change at {rate:0.00}/s, which should be under the 4/s ramp");
+        ValidationUtil.Near(RobotMotorController.ThrottleRate(4f, 1000f, v3.topSpeed), 4f, 1e-5f, "strong motors leave the ramp alone");
+        ValidationUtil.Near(RobotMotorController.ThrottleRate(4f, float.PositiveInfinity, v3.topSpeed), 4f, 1e-5f, "unknown watts leave the ramp alone");
+        // And through the slew: a full reversal at that rate takes 2/rate seconds, ~0.77 s.
+        float command = 1f, seconds = 0f;
+        while (command > -1f && seconds < 5f) { command = RobotMotorController.Slew(command, -1f, rate, rate, 0.01f); seconds += 0.01f; }
+        ValidationUtil.Near(seconds, 2f / rate, 0.011f, "a slammed reversal on 654V_v3's motors");
+        return 10;
     }
 
     // --- helpers ---
