@@ -6392,22 +6392,23 @@ MonoBehaviour:
   - {fileID: 5698281281410315781}
   leftJoystickAction: {fileID: -2567127469079716927, guid: 5d9b02529a3094fb9a16246c7d651a9f, type: 3}
   rightJoystickAction: {fileID: -4138797506576420852, guid: 5d9b02529a3094fb9a16246c7d651a9f, type: 3}
-  maxWheelRpm: 240
+  maxWheelRpm: 450
   wheelStallTorque: 700
   velocityDriveDamping: 1000
   wheelRollingResistance: 0.3
   wheelSpinDamping: 0.5
-  turnRate: 0.35
-  pivotTurnRate: 0.65
+  turnRate: 0.16
+  pivotTurnRate: 0.35
   invertLeft: 0
   invertRight: 0
   solverIterations: 16
   solverVelocityIterations: 8
   autoTuneDrive: 1
   driveForceTractionMultiple: 3
-  omniBrakeFraction: 0.2
+  driveWatts: 44
+  omniBrakeFraction: 0.1
   tractionPair: 0
-  loadTransferPitchDeg: 2.5
+  loadTransferPitchDeg: 3.5
   loadTransferFrequency: 12
   loadTransferDamping: 0.55
   inputDeadzone: 0.08
@@ -22345,8 +22346,8 @@ ArticulationBody:
     lowerLimit: 0
     upperLimit: 0
     stiffness: 0
-    damping: 0.11938133
-    forceLimit: 171.90912
+    damping: 0.063646525
+    forceLimit: 171.84563
     target: 0
     targetVelocity: 0
     driveType: 3
@@ -53730,8 +53731,8 @@ ArticulationBody:
     lowerLimit: 0
     upperLimit: 0
     stiffness: 0
-    damping: 0.11938133
-    forceLimit: 171.90912
+    damping: 0.063646525
+    forceLimit: 171.84563
     target: 0
     targetVelocity: 0
     driveType: 3
@@ -88697,8 +88698,8 @@ ArticulationBody:
     lowerLimit: 0
     upperLimit: 0
     stiffness: 0
-    damping: 0.11938133
-    forceLimit: 171.90912
+    damping: 0.063646525
+    forceLimit: 171.84563
     target: 0
     targetVelocity: 0
     driveType: 3
@@ -105915,8 +105916,8 @@ ArticulationBody:
     lowerLimit: 0
     upperLimit: 0
     stiffness: 0
-    damping: 0.11938133
-    forceLimit: 171.90912
+    damping: 0.063646525
+    forceLimit: 171.84563
     target: 0
     targetVelocity: 0
     driveType: 3
@@ -129307,8 +129308,8 @@ ArticulationBody:
     lowerLimit: 0
     upperLimit: 0
     stiffness: 0
-    damping: 0.11938133
-    forceLimit: 171.90912
+    damping: 0.063646525
+    forceLimit: 171.84563
     target: 0
     targetVelocity: 0
     driveType: 3
@@ -135651,8 +135652,8 @@ ArticulationBody:
     lowerLimit: 0
     upperLimit: 0
     stiffness: 0
-    damping: 0.11938133
-    forceLimit: 171.90912
+    damping: 0.063646525
+    forceLimit: 171.84563
     target: 0
     targetVelocity: 0
     driveType: 3

@@ -499,6 +499,16 @@ public static class PerfOverlayValidation
                 checks.Refuses(() => Throw(TitleProblem(PerfOverlay.HomePosition, 560f, home.title, home.scaler)),
                     "the old 560-wide panel in the corner, which the docked title slid under");
 
+            // On a notched phone the home spot moves in past the notch, and must still clear the docked title there.
+            Rect phoneSafe = PhoneSafe(home.scaler, out float phoneAspect);
+            Vector2 phoneHome = PerfOverlay.HomeSpot(phoneSafe);
+            checks.That(phoneHome.x >= phoneSafe.xMin,
+                $"on a notched iPhone the home panel starts {phoneHome.x:0} in, under the notch (the safe area starts {phoneSafe.xMin:0} in)");
+            string phoneTitle = TitleProblem(phoneHome, PerfOverlay.PanelWidth, home.title, home.scaler, phoneAspect);
+            checks.That(phoneTitle == null, phoneTitle);
+            checks.Refuses(() => { if (PerfOverlay.HomePosition.x < phoneSafe.xMin) throw new Exception("under the notch"); },
+                "the old fixed home spot, 40 in, on a notched iPhone");
+
             // Its position is written in the home screen's canvas units, so its canvas has to measure the same way.
             CanvasScaler own = root.GetComponent<CanvasScaler>();
             checks.That(home.scaler != null, "HomeScene has no ScreenSpaceOverlay canvas with a CanvasScaler to compare against");
@@ -540,7 +550,8 @@ public static class PerfOverlayValidation
     // row as Settings opens. Worked out in canvas units from the scene: the title's docked anchor span, its centred text
     // at the size TextMesh Pro gives it (GetPreferredValues measures an auto-sized text at its largest size), and the
     // canvas width a 4:3 screen has at the home canvas's scaler settings.
-    private static string TitleProblem(Vector2 position, float width, RectTransform title, CanvasScaler scaler)
+    private static string TitleProblem(Vector2 position, float width, RectTransform title, CanvasScaler scaler,
+        float aspect = NarrowestAspect)
     {
         if (title == null || scaler == null) return "HomeScene has no docking title or canvas scaler to measure the panel against";
         var text = title.GetComponent<TMP_Text>();
@@ -551,14 +562,14 @@ public static class PerfOverlayValidation
             text.horizontalAlignment != HorizontalAlignmentOptions.Center)
             return "the title or HomeStage changed shape (HomeStage should fill the canvas's width, the title be centred in " +
                    "its span), so the check can't say where the title's first letter lands";
-        float canvasWidth = CanvasWidth(NarrowestAspect, scaler);
+        float canvasWidth = CanvasWidth(aspect, scaler);
         float left = title.anchorMin.x * canvasWidth + title.anchoredPosition.x - title.sizeDelta.x * title.pivot.x;
         float right = dock.dockedAnchorMaxX * canvasWidth + title.anchoredPosition.x + title.sizeDelta.x * (1f - title.pivot.x);
         float letters = Mathf.Min(text.GetPreferredValues(text.text).x, right - left);
         float firstLetter = (left + right) / 2f - letters / 2f;
         float panelRight = position.x + width;
         return panelRight + TitleMargin <= firstLetter ? null
-            : $"with Settings open on a 4:3 screen the title's first letter lands {firstLetter:0} in, but the panel reaches " +
+            : $"with Settings open on a {aspect:0.00}:1 screen the title's first letter lands {firstLetter:0} in, but the panel reaches " +
               $"{panelRight:0} (it has to stop {TitleMargin:0} short), so the title would slide under it";
     }
 
@@ -616,11 +627,54 @@ public static class PerfOverlayValidation
         // ...and this check has to be able to fail: the old fixed spot sits on the dragged L1/L2.
         checks.Refuses(() => Throw(Covering(moved, PerfOverlay.FieldPosition, panel)), "the old fixed spot, under dragged L1/L2");
 
+        // THE NOTCH (2026-11-16): on an iPhone 13 in landscape the safe area starts 141 px in. The panel has to land inside
+        // it, under L1/L2 as before but moved in past the notch, and must still miss every control.
+        var phoneScaler = new GameObject("PhoneScaler").AddComponent<CanvasScaler>();
+        try
+        {
+            phoneScaler.referenceResolution = new Vector2(1920f, 1080f);
+            phoneScaler.matchWidthOrHeight = 0.5f;
+            Rect safe = PhoneSafe(phoneScaler, out _, out Vector2 phoneCanvas);
+            var phoneControls = new List<Rect>
+            {
+                new Rect(40f, 40f, 180f, 164f), new Rect(phoneCanvas.x - 220f, 40f, 180f, 164f),
+                new Rect(50f, phoneCanvas.y - 380f, 300f, 300f), new Rect(phoneCanvas.x - 350f, phoneCanvas.y - 380f, 300f, 300f),
+            };
+            Vector2 notched = PerfOverlay.ClearSpot(phoneControls, phoneCanvas, panel, safe);
+            string notchHit = Covering(phoneControls, notched, panel);
+            checks.That(notched.x >= safe.xMin && notched.x + panel.x <= safe.xMax && notchHit == null,
+                $"On a notched iPhone the panel went to ({notched.x:0}, {notched.y:0}); the safe area is {safe.xMin:0}..{safe.xMax:0} " +
+                $"across{(notchHit != null ? $", and it sits on {notchHit}" : "")}.");
+            Vector2 unsafeSpot = PerfOverlay.ClearSpot(phoneControls, phoneCanvas, panel);
+            checks.Refuses(() => { if (unsafeSpot.x < safe.xMin) throw new Exception("under the notch"); },
+                "the panel placed without the safe area, on a notched iPhone");
+            // And off a phone the safe area is the whole screen, so nothing moves.
+            Vector2 whole = PerfOverlay.ClearSpot(defaults, canvas, panel, new Rect(Vector2.zero, canvas));
+            checks.That(whole == PerfOverlay.FieldPosition,
+                $"With a safe area that is the whole screen the panel moved to ({whole.x:0}, {whole.y:0}) from {PerfOverlay.FieldPosition}.");
+        }
+        finally { UnityEngine.Object.DestroyImmediate(phoneScaler.gameObject); }
+
         // Nowhere clear: it still has to land somewhere, and on the least-covered spot rather than the first.
         var everywhere = new List<Rect> { new Rect(0f, 0f, 1920f, 1080f), new Rect(0f, 0f, 400f, 600f) };
         Vector2 cramped = PerfOverlay.ClearSpot(everywhere, canvas, panel);
         checks.That(cramped != PerfOverlay.FieldPosition,
             $"With every spot covered the panel stayed at the first one ({cramped.x:0}, {cramped.y:0}), under the most controls.");
+    }
+
+    // An iPhone 13 in landscape: 2532x1170 px, the notch side and the far side both inset 141 px (iOS insets both), and
+    // the home bar 63 px off the bottom. Returned in the canvas units that scaler gives it, y down from the top-left.
+    private static Rect PhoneSafe(CanvasScaler scaler, out float aspect) => PhoneSafe(scaler, out aspect, out _);
+
+    private static Rect PhoneSafe(CanvasScaler scaler, out float aspect, out Vector2 canvasSize)
+    {
+        const float w = 2532f, h = 1170f, side = 141f, bar = 63f;
+        aspect = w / h;
+        Vector2 reference = scaler != null ? scaler.referenceResolution : new Vector2(1920f, 1080f);
+        float match = scaler != null ? scaler.matchWidthOrHeight : 0.5f;
+        float scale = Mathf.Pow(2f, Mathf.Lerp(Mathf.Log(w / reference.x, 2f), Mathf.Log(h / reference.y, 2f), match));
+        canvasSize = new Vector2(w / scale, h / scale);
+        return PerfOverlay.SafeRect(Rect.MinMaxRect(side, bar, w - side, h), h, scale);
     }
 
     // What the panel at `position` (anchoredPosition, top-left pivot) would overlap, or null.

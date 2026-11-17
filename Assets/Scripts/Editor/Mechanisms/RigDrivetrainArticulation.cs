@@ -575,7 +575,8 @@ public class RigDrivetrainArticulation
             motor.driveForceTractionMultiple,
             // brakeTorque isn't baked into the drive (the forceLimit swap is a runtime decision) —
             // this only shapes the diagnostics below.
-            motor.omniBrakeFraction);
+            motor.omniBrakeFraction,
+            motor.driveWatts);
 
         // Honour the per-robot escape hatch here too, or the bake and the runtime would disagree
         // for exactly the robots someone deliberately hand-tuned.

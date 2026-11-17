@@ -293,7 +293,7 @@ public class PerfOverlay : MonoBehaviour
     private void EnterScene(Scene scene)
     {
         sceneName = scene.name;
-        parts.panel.anchoredPosition = sceneName == HomeSceneName ? HomePosition : FieldPosition;
+        parts.panel.anchoredPosition = sceneName == HomeSceneName ? HomeSpot(SafeRect()) : FieldPosition;
         // For the log's stage column. Settings > Robot > Performance is where the stage is switched.
         stageView = FindAnyObjectByType<RobotStageView>(FindObjectsInactive.Include);
         FindObstacles();
@@ -455,23 +455,53 @@ public class PerfOverlay : MonoBehaviour
             // Screen pixels (origin bottom-left) to this canvas's units measured down from the top-left.
             obstacleRects.Add(Rect.MinMaxRect(min.x / scale, (Screen.height - max.y) / scale, max.x / scale, (Screen.height - min.y) / scale));
         }
-        parts.panel.anchoredPosition = ClearSpot(obstacleRects, canvasRect.rect.size, parts.panel.sizeDelta);
+        parts.panel.anchoredPosition = ClearSpot(obstacleRects, canvasRect.rect.size, parts.panel.sizeDelta, SafeRect());
     }
+
+    // THE NOTCH (2026-11-16, Connor on the 1.2.0 TestFlight build: "the numbers show but i cant see the labels, its like
+    // under the top part of the phone where there is a black covering"). In landscape an iPhone's notch or Dynamic Island
+    // covers a strip down one side, and 40 units in put the label column right under it. Screen.safeArea is the part of
+    // the screen nothing covers, so every spot is measured from its edges instead of the screen's. Off a phone (editor,
+    // iPad, desktop) the safe area is the whole screen and every spot is exactly where it always was.
+    //
+    // Screen.safeArea in this canvas's units, measured from the top-left with y running down, like the spots.
+    private Rect SafeRect()
+    {
+        float scale = parts.canvas != null ? parts.canvas.scaleFactor : 0f;
+        if (scale <= 0f || Screen.width <= 0 || Screen.height <= 0) return new Rect(0f, 0f, float.MaxValue, float.MaxValue);
+        return SafeRect(Screen.safeArea, Screen.height, scale);
+    }
+
+    public static Rect SafeRect(Rect safeAreaPixels, float screenHeight, float scale) =>
+        Rect.MinMaxRect(safeAreaPixels.xMin / scale, (screenHeight - safeAreaPixels.yMax) / scale,
+            safeAreaPixels.xMax / scale, (screenHeight - safeAreaPixels.yMin) / scale);
+
+    // Where the panel goes on the home screen: HomePosition, pushed in past anything the safe area leaves out, and kept
+    // ControlMargin clear of its edge. Same shape as HomePosition (anchoredPosition, y negative).
+    public static Vector2 HomeSpot(Rect safe) =>
+        new Vector2(Mathf.Max(HomePosition.x, safe.xMin + ControlMargin), -Mathf.Max(-HomePosition.y, safe.yMin + ControlMargin));
 
     // Where the panel goes in a game, as its anchoredPosition (top-left pivot): the first spot in this order whose panel,
     // grown by ControlMargin, touches none of `controls`; if every spot touches something, the one that covers least.
     // Everything is in this canvas's units measured from the top-left corner with y running DOWN, which is how both the
     // controls and the panel are easiest to read off a screenshot. Under L1/L2 first, which is where the default layout
     // leaves room; then the top-left corner; the top middle; the top-right corner and under R1/R2; the two side middles.
-    public static Vector2 ClearSpot(IReadOnlyList<Rect> controls, Vector2 canvasSize, Vector2 panelSize)
+    // `safe` is the part of the canvas the notch and the home bar leave visible (see SafeRect); every edge spot keeps
+    // ControlMargin inside it as well as its usual 40 in from the screen's edge. Left out, it is the whole canvas.
+    public static Vector2 ClearSpot(IReadOnlyList<Rect> controls, Vector2 canvasSize, Vector2 panelSize, Rect? safe = null)
     {
         float edge = HomePosition.x, under = -FieldPosition.y;
-        float right = canvasSize.x - edge - panelSize.x, middleX = (canvasSize.x - panelSize.x) * 0.5f;
-        float middleY = (canvasSize.y - panelSize.y) * 0.5f;
+        Rect s = safe ?? new Rect(0f, 0f, canvasSize.x, canvasSize.y);
+        float left = Mathf.Max(edge, s.xMin + ControlMargin);
+        float top = Mathf.Max(edge, s.yMin + ControlMargin);
+        float right = Mathf.Min(canvasSize.x - edge, s.xMax - ControlMargin) - panelSize.x;
+        float below = Mathf.Max(under, top);
+        float middleX = (Mathf.Max(0f, s.xMin) + Mathf.Min(canvasSize.x, s.xMax) - panelSize.x) * 0.5f;
+        float middleY = (Mathf.Max(0f, s.yMin) + Mathf.Min(canvasSize.y, s.yMax) - panelSize.y) * 0.5f;
         Vector2[] spots =
         {
-            new Vector2(edge, under), new Vector2(edge, edge), new Vector2(middleX, edge),
-            new Vector2(right, edge), new Vector2(right, under), new Vector2(edge, middleY), new Vector2(right, middleY),
+            new Vector2(left, below), new Vector2(left, top), new Vector2(middleX, top),
+            new Vector2(right, top), new Vector2(right, below), new Vector2(left, middleY), new Vector2(right, middleY),
         };
 
         Vector2 best = spots[0];

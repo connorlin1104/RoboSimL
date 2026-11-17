@@ -49,6 +49,39 @@ public static class DrivetrainTuning
     // 700/1000 pairing got wrong by ~57x. See Result.motorLimitedStick.
     public const float DefaultDriveForceTractionMultiple = 3.0f;
 
+    // THE MOTORS THEMSELVES (2026-11-16). A robot that says how many watts of V5 motor are on its
+    // drivetrain (RobotMotorController.driveWatts, typed to match the Model Catalog's chip) gets its
+    // STRAIGHT-LINE acceleration from those motors, its gearing and its weight: Result.motorAccel,
+    // which caps how fast the throttle command may change (RobotMotorController.ThrottleRate).
+    // Connor, after driving 1.2.0 build 1: v3 "shouldn't move as fast" as the light 360 drivetrain
+    // "because of weight", and a slammed reversal should "jerk" instead of flipping instantly. Both
+    // were the multiple above: it scales the motor WITH the robot's weight, so a heavy robot launched
+    // and reversed exactly as hard as a light one.
+    //
+    // A V5 11 W motor stalls at 2.1 N*m on its 100 RPM (red) cartridge, and the cartridges and any
+    // gearing after them trade speed for torque one for one, so torque * free RPM is a constant of the
+    // motor: 210 N*m*RPM per 11 W, and the 5.5 W motor is half of that. At the wheel, then:
+    //     stall torque (N*m) = watts * (210 / 11) / wheel RPM
+    // 654V_v3 (44 W, 450 RPM, 2.75 in omnis, 11.8 kg) pulls 54 N: 0.46 g, so it takes ~0.4 s to reach
+    // top speed and ~0.8 s to turn a full-speed run around. The others' motors out-pull their weight
+    // enough that the existing ramp is already the slower of the two, and they drive as before.
+    //
+    // WHY NOT THE FORCE LIMIT ITSELF — built first and measured out the same day. Stall force from the
+    // watts gave v3 0.54x its grip, and v3 then pivoted 4 degrees in 1.5 s (628 before) and arced 1.
+    // The tyre holds a STILL contact sideways at the full 0.8 until it starts sliding (WheelTyreModel:
+    // a velocity-keyed friction cannot see a force inside the step that creates it), so a yaw has to
+    // break the end wheels loose at full grip first; the multiple of 3 is what pays for that. A real
+    // omni's rollers would let it go almost free. So the motors shape the straight line, where the
+    // tyre is exact, and the turn keeps the strength the turn rates were tuned against.
+    // Zero watts: no cap, the robot drives exactly as before.
+    public const float V5TorqueRpmPerWatt = 210f / 11f;
+    // N*m to this world's torque: mass in kg, 1 u = 0.1 m, so 1 N*m = 100 kg*u^2/s^2.
+    public const float NewtonMetresToWorld = 100f;
+
+    // Stall torque at the wheels, all motors together, in N*m.
+    public static float MotorStallTorqueNm(float driveWatts, float wheelRpm) =>
+        wheelRpm > 0f ? Mathf.Max(driveWatts, 0f) * V5TorqueRpmPerWatt / wheelRpm : 0f;
+
     // Braking authority as a fraction of the tyres' grip, used whenever the command TRAILS the
     // wheels' spin with the sticks at centre — which, with centre stick as the brake pedal, is every
     // release of the sticks. A held stick ramps a back-driven wheel from this up to stall torque
@@ -64,17 +97,21 @@ public static class DrivetrainTuning
     // ground: the force builds progressively with the command rather than saturating instantly,
     // and the robot's own inertia is what the driver feels.
     //
-    // ONE NUMBER, the all-omni one (0.2 -> 0.16 g), because that is what almost every robot runs:
+    // ONE NUMBER, the all-omni one (0.1 -> 0.08 g), because that is what almost every robot runs:
     // an omni's rollers give it no sideways grip and a small, hard contact patch forwards, so it
-    // cannot put a hard stop down. Releasing the sticks rolls a 240 RPM robot on for about 0.28 m
-    // (0.62 m on a 360 RPM drive), and one that was mid-turn keeps swinging. That roll-out IS the
+    // cannot put a hard stop down. Releasing the sticks rolls a 240 RPM robot on for about 0.55 m
+    // (1.24 m on a 360 RPM drive), and one that was mid-turn keeps swinging.
+    //   2026-11-16: HALVED from 0.2 (0.28 m / 0.62 m) on Connor's word after driving 1.2.0 build 1
+    //   on the phone: "the drift could be a bit more, like let the wheels free spin a bit more before
+    //   coming to rest" — he picked "about double" the roll-out. The parking hold's gate is derived
+    //   from brakeG (RobotMotorController.ParkGateSpeed), so it follows on its own. That roll-out IS the
     // drift an all-omni drive has. A robot with a traction pair brakes on the same number: where a
     // traction wheel differs is its SIDEWAYS grip, which is the tyre's business (WheelTyreModel),
     // not the brake's. The old second fraction (0.7, a firm 0.08 m stop) went with the Settings
     // checkbox that picked it — a hardware question a player could not answer and that silently
     // changed the physics. Stays under the 0.8 g cone, so a stop is motor-limited (progressive),
     // never traction-limited (an instant skid).
-    public const float DefaultOmniBrakeFraction = 0.2f;
+    public const float DefaultOmniBrakeFraction = 0.1f;
 
     // THE OMNI TYRE (see WheelTyreModel). Friction across the wheel's rolling direction, as the
     // coefficient a contact drops to once it is moving sideways; the material's 0.8 is what it grips
@@ -173,11 +210,16 @@ public static class DrivetrainTuning
         // and is meant to reach the cone.
         public float brakeG;
         public float tractionG;
+
+        // u/s^2: the straight-line acceleration the drive motors can give this robot's mass, from
+        // RobotMotorController.driveWatts. PositiveInfinity when the watts are not known.
+        public float motorAccel;
     }
 
     public static Result Compute(float totalMass, float wheelRadius, int wheelCount,
         float maxWheelRpm, float friction, float gravity,
-        float driveForceTractionMultiple, float brakeTractionFraction = DefaultOmniBrakeFraction)
+        float driveForceTractionMultiple, float brakeTractionFraction = DefaultOmniBrakeFraction,
+        float driveWatts = 0f)
     {
         // Everything is clamped rather than guarded-and-returned: a half-rigged robot must still
         // produce finite, non-negative values, because these go straight into PhysX and a NaN
@@ -199,6 +241,12 @@ public static class DrivetrainTuning
         // Floor the peak force so a zero-mass or frictionless robot still gets a drive that turns
         // the wheels at all, instead of a silently dead drivetrain.
         r.peakForce = Mathf.Max(r.tractionForce * multiple, 1e-3f);
+
+        // The straight-line acceleration the robot's own motors could give its mass (see
+        // V5TorqueRpmPerWatt). Infinite when the watts are not known: no cap.
+        r.motorAccel = driveWatts > 0f && radius > 0f && mass > 0f && maxWheelRpm > 0f
+            ? MotorStallTorqueNm(driveWatts, maxWheelRpm) * NewtonMetresToWorld / radius / mass
+            : float.PositiveInfinity;
         r.motorLimitedStick = Mathf.Clamp01(r.tractionForce / r.peakForce);
 
         r.stallTorque = r.peakForce * radius / wheels;
